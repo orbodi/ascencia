@@ -1,0 +1,137 @@
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Outfit", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+  --color-ink: #102a2a;
+  --color-ink-soft: #3d5c57;
+  --color-mist: #e2ece7;
+  --color-paper: #f3f7f5;
+  --color-surface: #ffffff;
+  --color-accent: #0d7a5f;
+  --color-accent-deep: #085544;
+  --color-accent-soft: #d5efe6;
+  --color-warn: #b45309;
+  --color-line: #c8d9d1;
+  --color-sidebar: #0c2220;
+  --color-sidebar-mid: #143532;
+}
+
+:root {
+  color: var(--color-ink);
+  background: var(--color-paper);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  margin: 0;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* Atmosphère de fond — dégradé + grille fine */
+.app-shell {
+  background:
+    radial-gradient(ellipse 80% 50% at 100% -10%, rgba(13, 122, 95, 0.12), transparent 55%),
+    radial-gradient(ellipse 60% 40% at -10% 80%, rgba(16, 42, 42, 0.06), transparent 50%),
+    linear-gradient(165deg, #f6faf8 0%, #eef4f1 45%, #e8f0ec 100%);
+}
+
+.app-shell::before {
+  content: "";
+  pointer-events: none;
+  position: fixed;
+  inset: 0;
+  opacity: 0.35;
+  background-image:
+    linear-gradient(rgba(16, 42, 42, 0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(16, 42, 42, 0.03) 1px, transparent 1px);
+  background-size: 32px 32px;
+  z-index: 0;
+}
+
+@keyframes fade-up {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes fade-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.animate-fade-up {
+  animation: fade-up 0.45s ease-out both;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.35s ease-out both;
+}
+
+.stagger-1 {
+  animation-delay: 0.05s;
+}
+.stagger-2 {
+  animation-delay: 0.1s;
+}
+.stagger-3 {
+  animation-delay: 0.15s;
+}
+.stagger-4 {
+  animation-delay: 0.2s;
+}
+.stagger-5 {
+  animation-delay: 0.25s;
+}
+.stagger-6 {
+  animation-delay: 0.3s;
+}
+
+/* Tables */
+.bo-table {
+  width: 100%;
+  font-size: 0.875rem;
+  border-collapse: collapse;
+}
+
+.bo-table thead {
+  background: color-mix(in srgb, var(--color-mist) 70%, white);
+  text-align: left;
+}
+
+.bo-table th {
+  padding: 0.75rem 1rem;
+  font-weight: 600;
+  font-size: 0.7rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: var(--color-ink-soft);
+}
+
+.bo-table td {
+  padding: 0.85rem 1rem;
+  border-top: 1px solid var(--color-line);
+  vertical-align: middle;
+}
+
+.bo-table tbody tr {
+  transition: background 0.15s ease;
+}
+
+.bo-table tbody tr:hover {
+  background: color-mix(in srgb, var(--color-accent-soft) 35%, white);
+}

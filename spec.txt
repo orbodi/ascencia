@@ -1,0 +1,224 @@
+# POC — Assistant IA de gestion des emplois du temps (version resserrée)
+
+## Objectif du POC
+
+Prouver un seul parcours bout-en-bout :
+
+1. Un enseignant signale une indisponibilité (chat / WhatsApp).
+2. L’agent lit le planning, détecte les cours impactés et propose des solutions.
+3. Un humain valide une proposition.
+4. Le système met à jour PostgreSQL, régénère un PDF, notifie les concernés.
+
+Hors scope POC (phase 2) :
+- génération / optimisation globale d’un EDT complet ;
+- Excel / CSV / HTML (garder PDF seulement) ;
+- architecture hexagonale / SaaS multi-tenant ;
+- dialogue étudiants avec l’IA.
+
+Contexte volume : ~14 enseignants, ~400 étudiants (les étudiants reçoivent seulement le PDF dans le groupe WhatsApp promo).
+
+---
+
+## Stack imposée (POC)
+
+- Python 3.12
+- FastAPI + Pydantic V2
+- LangGraph + Google Gemini (`GEMINI_MODEL`, défaut `gemini-3.5-flash-lite`)
+- SQLAlchemy 2.x + Alembic + PostgreSQL
+- Docker / Docker Compose
+- python-dotenv, httpx
+- Jinja2 + WeasyPrint (PDF)
+- WhatsApp Meta Cloud API (texte + document PDF)
+
+Qualité attendue sans sur-ingénierie :
+- modules clairs, typage, async, logs, `.env`, tests du parcours critique
+- KISS > Clean Architecture complète
+
+---
+
+## Architecture (simple)
+
+```
+app/
+  api/            # endpoints FastAPI
+  agent/          # LangGraph + prompts
+  tools/          # outils appelables par l’agent
+  domain/         # modèles SQLAlchemy + règles planning
+  services/       # orchestration (validation, diffusion)
+  exporters/      # PDF Jinja2/WeasyPrint
+  whatsapp/       # webhook + envoi
+  config/
+tests/
+docker-compose.yml
+requirements.txt
+.env.example
+README.md
+```
+
+---
+
+## Domaine & règles métier (à implémenter explicitement)
+
+### Entités minimales
+
+- Teacher (nom, email, telephone_whatsapp)
+- StudentGroup (nom, whatsapp_group_id)
+- Room (nom, capacite)
+- Course (titre, teacher_id, group_id, duree_minutes)
+- TimeSlot (jour_semaine, heure_debut, heure_fin) — grille fixe de l’université
+- ScheduleEntry (course_id, room_id, date ou week+timeslot, statut)
+- Availability (teacher_id, debut, fin, motif)
+- ScheduleChange (entry_id, avant/après JSON, statut: proposed|approved|rejected|applied, propose_par)
+- ConversationHistory (channel, external_user_id, role, content, ts)
+- AuditLog (action, payload, ts)
+
+### Contraintes de conflit (MVP)
+
+Un créneau est invalide si :
+- le même enseignant a déjà un cours qui chevauche ;
+- la même salle est déjà prise sur le chevauchement ;
+- le même groupe étudiants a déjà un cours qui chevauche ;
+- l’enseignant a une Availability bloquante sur ce créneau ;
+- la salle est trop petite pour l’effectif du groupe (si effectif connu, sinon ignorer).
+
+### Qui valide ?
+
+- L’enseignant confirme la proposition qui le concerne ;
+- l’administration peut aussi approuver via API (`POST /schedule-changes/{id}/approve`).
+- Aucune écriture planning sans statut `approved` puis `applied`.
+
+### Si aucune solution
+
+L’agent répond clairement qu’aucune solution n’a été trouvée et propose d’alerter l’administration (sans inventer de créneau).
+
+---
+
+## Agent IA (LangGraph + Gemini)
+
+Comportement :
+- comprendre le langage naturel ;
+- appeler les tools avant de conclure ;
+- demander les infos manquantes (quelle date ? toute la journée ?) ;
+- proposer 2–3 options max, avec explication courte ;
+- attendre confirmation explicite avant d’appliquer ;
+- persister l’historique.
+
+Modèle : configurable via `.env` (`GEMINI_MODEL`). Ne pas hardcoder `gemini-2.5-flash`.
+
+### Tools MVP
+
+Enseignants / dispo
+- get_teacher
+- get_teacher_schedule
+- get_teacher_availability
+- update_teacher_availability
+
+Planning
+- find_impacted_entries
+- find_available_slots
+- detect_conflicts
+- propose_move_course
+- apply_schedule_change (uniquement si change approuvé)
+
+Notifications / export
+- generate_group_schedule_pdf
+- generate_teacher_schedule_pdf
+- notify_teacher
+- notify_group
+- notify_administration
+
+Historique
+- save_conversation
+- audit_log
+
+Pas de `generate_schedule` / `optimize_schedule` dans le POC.
+
+---
+
+## API REST (MVP)
+
+```
+GET  /health
+GET  /teachers
+GET  /schedule/teacher/{teacher_id}
+GET  /schedule/group/{group_id}
+GET  /schedule/export/pdf/teacher/{teacher_id}
+GET  /schedule/export/pdf/group/{group_id}
+POST /availability
+POST /schedule-changes/{id}/approve
+POST /schedule-changes/{id}/reject
+POST /agent/chat                  # canal admin / test sans WhatsApp
+POST /webhook/whatsapp
+```
+
+Auth API : token simple `API_TOKEN` en header pour le POC (pas de SSO).
+Webhook WhatsApp : vérifier la signature Meta.
+
+---
+
+## WhatsApp (MVP)
+
+- Recevoir messages texte via webhook
+- Réponses texte
+- Envoi d’un PDF (planning) au prof / admin / groupe promo
+- Mapper `telephone_whatsapp` → Teacher
+- Templates Meta uniquement si nécessaires hors fenêtre 24h (prévoir 1 template « planning mis à jour »)
+
+Hors POC : images, Excel, multi-templates complexes.
+
+---
+
+## Export PDF (MVP)
+
+Un seul rendu pro via Jinja2 + WeasyPrint :
+- planning enseignant
+- planning groupe
+
+En-tête : nom université, semestre, semaine, date de génération, logo (placeholder OK).
+
+---
+
+## Scénario de démo (doit passer de bout en bout)
+
+Prof : « Je serai absent mercredi. »
+
+Agent :
+1. clarifie la date/semaine si besoin ;
+2. marque l’indisponibilité ;
+3. liste les cours impactés ;
+4. cherche des créneaux sans conflit ;
+5. propose 2–3 options ;
+6. attend « OK option 2 » (ou équivalent) ;
+7. applique en base ;
+8. régénère les PDF ;
+9. notifie prof + admin + groupe étudiants.
+
+---
+
+## Données de seed
+
+Prévoir un jeu de démo :
+- 5–14 enseignants
+- 3–5 groupes
+- quelques salles
+- 1 semaine de planning déjà remplie
+- numéros WhatsApp de test (ou mode mock WhatsApp si pas de compte Meta)
+
+Mode `WHATSAPP_MOCK=true` : log les envois au lieu d’appeler Meta (indispensable pour développer sans compte business).
+
+---
+
+## Plan d’implémentation (ordre imposé)
+
+À chaque étape : expliquer les choix, puis coder, puis valider.
+
+1. Arborescence + Docker Compose (Postgres) + config `.env`
+2. Modèles SQLAlchemy + Alembic + seed
+3. Services/tools planning (conflits, créneaux, propositions) + tests unitaires
+4. Agent LangGraph + `POST /agent/chat`
+5. Export PDF
+6. Diffusion post-validation (regenerate + notify mock)
+7. WhatsApp réel (webhook + envoi) derrière feature flag
+8. README + scénario de démo documenté
+
+Ne pas avancer à l’étape N+1 tant que N n’est pas démontrable.
