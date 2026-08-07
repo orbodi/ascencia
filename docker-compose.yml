@@ -23,15 +23,18 @@ services:
       - .env
     environment:
       DATABASE_URL: postgresql+asyncpg://geminia:geminia@db:5432/geminia
+      BACKOFFICE_DIST_DIR: /opt/ascencia/frontend/dist
+      UVICORN_RELOAD: "0"
     ports:
       - "8000:8000"
-    volumes:
-      - .:/app
     depends_on:
       db:
         condition: service_healthy
-    command: uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
+    # Image autonome : front buildé + migrate + seed au démarrage
+    # Pas de bind-mount pour que /backoffice fonctionne dès le clone
 
+  # Front Vite (hot reload) — optionnel
+  # docker compose --profile dev up frontend
   frontend:
     image: node:22-alpine
     container_name: geminia-frontend
