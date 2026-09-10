@@ -2,13 +2,26 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import unicodedata
+from datetime import date, timedelta
 
 from langchain_core.messages import AIMessage, HumanMessage
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from app.agent.graph import build_agent, model_candidates
-from app.domain.models import ConversationHistory, Teacher
+from app.domain.models import (
+    ConversationHistory,
+    Course,
+    Room,
+    ScheduleChange,
+    ScheduleChangeStatus,
+    ScheduleEntry,
+    ScheduleEntryStatus,
+    Teacher,
+    TimeSlot,
+)
 from app.services.system_config import get_gemini_model
 
 logger = logging.getLogger(__name__)
@@ -54,11 +67,28 @@ class AgentService:
         external_user_id: str,
         channel: str = "api",
         teacher_id: int | None = None,
+        actor_role: str = "admin",
     ) -> dict:
         extra = await self._build_context(teacher_id)
         history = await self._load_history(channel, external_user_id, limit=12)
 
         await self._save_message(channel, external_user_id, "user", message)
+
+        local_reply = await self._local_command_response(
+            message, actor_role=actor_role, teacher_id=teacher_id
+        )
+        if local_reply is not None:
+            await self._save_message(
+                channel, external_user_id, "assistant", local_reply
+            )
+            await self.session.commit()
+            return {
+                "reply": local_reply,
+                "model": "moteur-local-fiable",
+                "external_user_id": external_user_id,
+                "channel": channel,
+                "teacher_id": teacher_id,
+            }
 
         preferred = await get_gemini_model(self.session)
         lc_messages = history + [HumanMessage(content=message)]
@@ -73,6 +103,8 @@ class AgentService:
                         self.session,
                         extra_context=extra,
                         model_name=model_name,
+                        actor_role=actor_role,
+                        actor_teacher_id=teacher_id,
                     )
                     result = await agent.ainvoke({"messages": lc_messages})
                     reply = self._extract_reply(result["messages"])
@@ -121,11 +153,17 @@ class AgentService:
         }
 
     async def _build_context(self, teacher_id: int | None) -> str | None:
+        today = date.today()
+        monday = today - timedelta(days=today.weekday())
+        sunday = monday + timedelta(days=6)
         if teacher_id is None:
             return (
-                "Canal administration/test. Identifie l'enseignant via list_teachers "
-                "si le nom n'est pas clair. Semaine de démo seed: 2026-08-03 → 2026-08-07 "
-                "(Alice Martin absente le 2026-08-05 pour le scénario)."
+                "Canal administration authentifié. Identifie l'enseignant via "
+                "list_teachers si le nom n'est pas clair. "
+                f"Date du jour : {today.isoformat()}. Semaine courante : "
+                f"{monday.isoformat()} à {sunday.isoformat()}. "
+                "Les données peuvent être un jeu de démonstration : ne les présente "
+                "jamais comme des observations de terrain."
             )
         teacher = await self.session.get(Teacher, teacher_id)
         if teacher is None:
@@ -133,8 +171,98 @@ class AgentService:
         return (
             f"Utilisateur courant = enseignant #{teacher.id} ({teacher.name}, "
             f"{teacher.email}). Priorise ses demandes. "
-            "Semaine de démo seed: 2026-08-03 → 2026-08-07."
+            f"Date du jour : {today.isoformat()}. Semaine courante : "
+            f"{monday.isoformat()} à {sunday.isoformat()}."
         )
+
+    async def _local_command_response(
+        self, message: str, *, actor_role: str, teacher_id: int | None
+    ) -> str | None:
+        """Répond vite aux requêtes factuelles simples, sans dépendre du LLM."""
+        normalized = "".join(
+            char
+            for char in unicodedata.normalize("NFD", message.lower())
+            if unicodedata.category(char) != "Mn"
+        )
+        if any(term in normalized for term in ("bonjour", "aide", "que peux-tu")):
+            return (
+                "Bonjour. Je peux afficher le **planning de la semaine**, donner "
+                "l'**état du système**, contrôler les **validations en attente** et "
+                "accompagner le traitement d'une indisponibilité. Les modifications "
+                "restent soumises à l'approbation de l'administration."
+            )
+
+        if any(term in normalized for term in ("etat du systeme", "resume", "synthese")):
+            teacher_count = await self.session.scalar(
+                select(func.count()).select_from(Teacher).where(Teacher.is_active.is_(True))
+            ) or 0
+            course_count = await self.session.scalar(
+                select(func.count()).select_from(Course)
+            ) or 0
+            pending = await self.session.scalar(
+                select(func.count()).select_from(ScheduleChange).where(
+                    ScheduleChange.status == ScheduleChangeStatus.proposed
+                )
+            ) or 0
+            return (
+                "**État actuel du système**\n"
+                f"- {teacher_count} enseignant(s) actif(s)\n"
+                f"- {course_count} cours enregistré(s)\n"
+                f"- {pending} proposition(s) en attente de validation\n\n"
+                "Ces chiffres proviennent directement de la base de données."
+            )
+
+        if "validation" in normalized:
+            pending = await self.session.scalar(
+                select(func.count()).select_from(ScheduleChange).where(
+                    ScheduleChange.status == ScheduleChangeStatus.proposed
+                )
+            ) or 0
+            return (
+                f"Il y a **{pending} proposition(s)** en attente. "
+                "L'administration doit d'abord les approuver, puis les appliquer."
+            )
+
+        if "planning" in normalized and "semaine" in normalized:
+            today = date.today()
+            monday = today - timedelta(days=today.weekday())
+            sunday = monday + timedelta(days=6)
+            stmt = (
+                select(ScheduleEntry)
+                .where(
+                    ScheduleEntry.entry_date >= monday,
+                    ScheduleEntry.entry_date <= sunday,
+                    ScheduleEntry.status == ScheduleEntryStatus.scheduled,
+                )
+                .options(
+                    selectinload(ScheduleEntry.course).selectinload(Course.teacher),
+                    selectinload(ScheduleEntry.course).selectinload(Course.group),
+                    selectinload(ScheduleEntry.room),
+                    selectinload(ScheduleEntry.timeslot),
+                )
+                .order_by(ScheduleEntry.entry_date, ScheduleEntry.timeslot_id)
+            )
+            if actor_role == "teacher" and teacher_id is not None:
+                stmt = stmt.join(Course).where(Course.teacher_id == teacher_id)
+            rows = (await self.session.execute(stmt)).scalars().all()
+            if not rows:
+                return (
+                    f"Aucune séance planifiée entre le {monday.strftime('%d/%m/%Y')} "
+                    f"et le {sunday.strftime('%d/%m/%Y')}."
+                )
+            lines = ["**Planning de la semaine**"]
+            for entry in rows:
+                lines.append(
+                    f"- **{entry.entry_date.strftime('%d/%m')} "
+                    f"({entry.timeslot.start_time.strftime('%H:%M')} - "
+                    f"{entry.timeslot.end_time.strftime('%H:%M')})** : "
+                    f"{entry.course.title} · {entry.course.group.name} · "
+                    f"{entry.room.name} · {entry.course.teacher.name} "
+                    f"(séance #{entry.id})"
+                )
+            return "\n".join(lines)
+
+        return None
 
     async def _load_history(
         self, channel: str, external_user_id: str, limit: int = 12

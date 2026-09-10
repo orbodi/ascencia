@@ -14,6 +14,7 @@ import { ChangesPage } from "./pages/Changes";
 import { HistoryPage } from "./pages/History";
 import { ConfigPage } from "./pages/Config";
 import { ChatPage } from "./pages/Chat";
+import { PublicationsPage } from "./pages/Publications";
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -36,6 +37,7 @@ export default function App() {
               <Route path="rooms" element={<RoomsPage />} />
               <Route path="courses" element={<CoursesPage />} />
               <Route path="schedule" element={<SchedulePage />} />
+              <Route path="publications" element={<PublicationsPage />} />
               <Route path="changes" element={<ChangesPage />} />
               <Route path="history" element={<HistoryPage />} />
               <Route path="config" element={<ConfigPage />} />

@@ -20,6 +20,7 @@ from app.domain.models import (
     ScheduleEntryStatus,
     TimeSlot,
 )
+from app.services.planning_service import PlanningService
 
 router = APIRouter(tags=["admin-schedule"])
 
@@ -121,6 +122,17 @@ async def create_schedule_entry(
     _user: AdminUser = Depends(require_admin_write),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
+    try:
+        conflicts = await PlanningService(session).validate_schedule_entry(
+            course_id=body.course_id,
+            room_id=body.room_id,
+            timeslot_id=body.timeslot_id,
+            entry_date=body.entry_date,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if conflicts:
+        raise HTTPException(status_code=409, detail={"conflicts": conflicts})
     entry = ScheduleEntry(**body.model_dump())
     session.add(entry)
     await session.commit()
@@ -141,6 +153,18 @@ async def update_schedule_entry(
     entry = await session.get(ScheduleEntry, entry_id)
     if entry is None:
         raise HTTPException(status_code=404, detail="Séance introuvable")
+    try:
+        conflicts = await PlanningService(session).validate_schedule_entry(
+            course_id=body.course_id,
+            room_id=body.room_id,
+            timeslot_id=body.timeslot_id,
+            entry_date=body.entry_date,
+            ignore_entry_id=entry_id,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if conflicts:
+        raise HTTPException(status_code=409, detail={"conflicts": conflicts})
     for key, value in body.model_dump().items():
         setattr(entry, key, value)
     await session.commit()

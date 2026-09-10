@@ -13,9 +13,6 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 
-GRAPH_API_BASE = "https://graph.facebook.com/v21.0"
-
-
 def normalize_phone(phone: str | None) -> str:
     if not phone:
         return ""
@@ -29,8 +26,13 @@ class WhatsAppClient:
         self.phone_number_id = settings.whatsapp_phone_number_id
 
     @property
+    def graph_api_base(self) -> str:
+        version = settings.whatsapp_graph_api_version.strip().lstrip("v")
+        return f"https://graph.facebook.com/v{version}"
+
+    @property
     def messages_url(self) -> str:
-        return f"{GRAPH_API_BASE}/{self.phone_number_id}/messages"
+        return f"{self.graph_api_base}/{self.phone_number_id}/messages"
 
     async def send_text(self, to: str, body: str) -> dict[str, Any]:
         to_norm = normalize_phone(to)
@@ -49,6 +51,50 @@ class WhatsAppClient:
             "text": {"preview_url": False, "body": body[:4096]},
         }
         return await self._post_json(payload)
+
+    async def send_template(
+        self,
+        to: str,
+        template_name: str,
+        language_code: str = "fr",
+        components: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        """Envoie un modèle Meta approuvé, y compris hors fenêtre de 24 heures."""
+        to_norm = normalize_phone(to)
+        if not to_norm:
+            return {"ok": False, "error": "Numéro destinataire invalide"}
+        if self.mock:
+            logger.info(
+                "[WHATSAPP_MOCK] template to=%s name=%s language=%s",
+                to_norm,
+                template_name,
+                language_code,
+            )
+            return {
+                "ok": True,
+                "mock": True,
+                "to": to_norm,
+                "template": template_name,
+                "language": language_code,
+            }
+        if not self.phone_number_id:
+            return {"ok": False, "error": "WHATSAPP_PHONE_NUMBER_ID manquant"}
+
+        template: dict[str, Any] = {
+            "name": template_name,
+            "language": {"code": language_code},
+        }
+        if components:
+            template["components"] = components
+        return await self._post_json(
+            {
+                "messaging_product": "whatsapp",
+                "recipient_type": "individual",
+                "to": to_norm,
+                "type": "template",
+                "template": template,
+            }
+        )
 
     async def send_document(
         self,
@@ -97,7 +143,7 @@ class WhatsAppClient:
     async def _upload_media(self, path: Path) -> str | None:
         mime, _ = mimetypes.guess_type(str(path))
         mime = mime or "application/octet-stream"
-        url = f"{GRAPH_API_BASE}/{self.phone_number_id}/media"
+        url = f"{self.graph_api_base}/{self.phone_number_id}/media"
         headers = {"Authorization": f"Bearer {self.token}"}
         async with httpx.AsyncClient(timeout=60) as client:
             with path.open("rb") as handle:

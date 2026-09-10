@@ -5,15 +5,18 @@ from __future__ import annotations
 import hashlib
 import hmac
 import logging
+import re
 from typing import Any
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.agent import AgentService
 from app.config import settings
-from app.domain.models import Teacher
+from app.domain.models import ProcessedInboundMessage, Teacher
 from app.services.system_config import get_agent_name
+from app.services.presence_service import PresenceCampaignService
 from app.whatsapp.client import WhatsAppClient, normalize_phone
 from app.whatsapp.contacts import WhatsAppPerson, find_person_by_phone
 
@@ -24,7 +27,7 @@ def verify_meta_signature(raw_body: bytes, signature_header: str | None) -> bool
     """Valide X-Hub-Signature-256 si WHATSAPP_APP_SECRET est défini."""
     secret = settings.whatsapp_app_secret
     if not secret:
-        return True
+        return settings.app_env.lower() not in {"production", "prod"}
     if not signature_header or not signature_header.startswith("sha256="):
         return False
     expected = signature_header.split("=", 1)[1]
@@ -62,10 +65,39 @@ class WhatsAppWebhookService:
         inbound = extract_inbound_messages(payload)
         results: list[dict[str, Any]] = []
         for msg in inbound:
-            results.append(await self._handle_one(msg["from"], msg["text"]))
-        return {"ok": True, "processed": len(results), "results": results}
+            message_id = msg.get("message_id", "").strip()
+            if message_id:
+                receipt = ProcessedInboundMessage(
+                    channel="whatsapp",
+                    message_id=message_id,
+                    sender_id=normalize_phone(msg["from"]),
+                )
+                self.session.add(receipt)
+                try:
+                    await self.session.flush()
+                except IntegrityError:
+                    await self.session.rollback()
+                    results.append({
+                        "message_id": message_id,
+                        "ignored": True,
+                        "reason": "message_deja_traite",
+                    })
+                    continue
+            result = await self._handle_one(msg["from"], msg["text"])
+            result["message_id"] = message_id or None
+            results.append(result)
+            await self.session.commit()
+        return {
+            "ok": True,
+            "processed": sum(not item.get("ignored", False) for item in results),
+            "ignored": sum(item.get("ignored", False) for item in results),
+            "results": results,
+        }
 
     async def _handle_one(self, wa_from: str, text: str) -> dict[str, Any]:
+        presence_reply = await self._try_presence_response(wa_from, text)
+        if presence_reply is not None:
+            return presence_reply
         person = find_person_by_phone(wa_from)
         if person is None:
             # Fallback: numéro déjà présent en base Teacher
@@ -130,6 +162,55 @@ class WhatsAppWebhookService:
             person_name=person.full_name,
         )
 
+    async def _try_presence_response(
+        self, wa_from: str, text: str
+    ) -> dict[str, Any] | None:
+        match = re.match(
+            r"^\s*(CONFIRME|CONFIRMER|DISPONIBLE|INDISPONIBLE)\s+([A-Za-z0-9_-]+)"
+            r"(?:\s*[:\-]\s*(.*))?\s*$",
+            text,
+            flags=re.IGNORECASE,
+        )
+        if match is None:
+            return None
+        action, token, reason = match.groups()
+        decision = {"INDISPONIBLE": "unavailable", "DISPONIBLE": "available"}.get(
+            action.upper(), "confirmed"
+        )
+        try:
+            result = await PresenceCampaignService(self.session).record_response(
+                token,
+                decision=decision,
+                channel="whatsapp",
+                response_text=reason or text,
+                sender_phone=wa_from,
+            )
+            if decision == "confirmed":
+                reply = (
+                    "Votre disponibilité complète a été confirmée. Merci."
+                )
+            elif decision == "available":
+                reply = (
+                    "Vos créneaux ont été enregistrés. Le moteur va recalculer "
+                    "le planning avant sa validation finale."
+                )
+            else:
+                reply = (
+                    "Votre indisponibilité a été enregistrée. Cette version du "
+                    "planning devra être révisée par l'administration."
+                )
+        except ValueError as exc:
+            result = {"ok": False, "error": str(exc)}
+            reply = f"Votre réponse n'a pas été enregistrée : {exc}"
+        delivery = await self.whatsapp.send_text(wa_from, reply)
+        return {
+            "from": wa_from,
+            "recognized": result.get("ok", False),
+            "presence_response": result,
+            "reply": reply,
+            "delivery": delivery,
+        }
+
     async def _chat_and_reply(
         self,
         *,
@@ -144,6 +225,7 @@ class WhatsAppWebhookService:
             external_user_id=normalize_phone(wa_from),
             channel="whatsapp",
             teacher_id=teacher_id,
+            actor_role=role,
         )
         reply = agent_result["reply"]
         if len(reply) > 3900:

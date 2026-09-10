@@ -4,22 +4,52 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
+from datetime import date
 from typing import Any
 
 from langchain_core.tools import tool
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.models import Room, Teacher
+from app.domain.models import AuditLog, Course, Room, ScheduleChange, ScheduleEntry, Teacher
+from app.notifications import EmailClient
+from app.services.autonomous_workflow import AutonomousWorkflowService
 from app.services.history_service import HistoryService
+from app.services.generation_service import ScheduleGenerationService
+from app.services.system_config import get_availability_form_url
 from app.tools import planning as planning_tools
+from app.whatsapp import WhatsAppClient
 
 
 def _dump(data: Any) -> str:
     return json.dumps(data, ensure_ascii=False, default=str)
 
 
-def build_planning_tools(session: AsyncSession) -> list[Callable[..., Any]]:
+def build_planning_tools(
+    session: AsyncSession,
+    *,
+    actor_role: str = "admin",
+    actor_teacher_id: int | None = None,
+) -> list[Callable[..., Any]]:
+    def teacher_scope_error(requested_teacher_id: int) -> str | None:
+        if actor_role == "teacher" and requested_teacher_id != actor_teacher_id:
+            return _dump({"ok": False, "error": "Accès limité à votre propre fiche"})
+        return None
+
+    async def change_scope_error(change_id: int) -> str | None:
+        if actor_role != "teacher":
+            return None
+        change = await session.get(ScheduleChange, change_id)
+        if change is None:
+            return _dump({"ok": False, "error": "Proposition introuvable"})
+        teacher_id = await session.scalar(
+            select(Course.teacher_id)
+            .join(ScheduleEntry, ScheduleEntry.course_id == Course.id)
+            .where(ScheduleEntry.id == change.entry_id)
+        )
+        if teacher_id != actor_teacher_id:
+            return _dump({"ok": False, "error": "Accès limité à vos propres séances"})
+        return None
     @tool
     async def list_teachers() -> str:
         """Liste les enseignants (id, nom, email, téléphone WhatsApp)."""
@@ -79,16 +109,22 @@ def build_planning_tools(session: AsyncSession) -> list[Callable[..., Any]]:
     @tool
     async def get_teacher(teacher_id: int) -> str:
         """Récupère un enseignant par son identifiant numérique."""
+        if error := teacher_scope_error(teacher_id):
+            return error
         return _dump(await planning_tools.get_teacher(session, teacher_id))
 
     @tool
     async def get_teacher_schedule(teacher_id: int, day: str | None = None) -> str:
         """Planning d'un enseignant. day optionnel au format AAAA-MM-JJ."""
+        if error := teacher_scope_error(teacher_id):
+            return error
         return _dump(await planning_tools.get_teacher_schedule(session, teacher_id, day))
 
     @tool
     async def get_teacher_availability(teacher_id: int) -> str:
         """Indisponibilités enregistrées pour un enseignant."""
+        if error := teacher_scope_error(teacher_id):
+            return error
         return _dump(await planning_tools.get_teacher_availability(session, teacher_id))
 
     @tool
@@ -99,6 +135,8 @@ def build_planning_tools(session: AsyncSession) -> list[Callable[..., Any]]:
         reason: str | None = None,
     ) -> str:
         """Enregistre une indisponibilité. start_at/end_at en ISO-8601."""
+        if error := teacher_scope_error(teacher_id):
+            return error
         return _dump(
             await planning_tools.update_teacher_availability(
                 session, teacher_id, start_at, end_at, reason
@@ -108,6 +146,8 @@ def build_planning_tools(session: AsyncSession) -> list[Callable[..., Any]]:
     @tool
     async def find_impacted_entries(teacher_id: int, day: str) -> str:
         """Séances impactées pour un enseignant à une date AAAA-MM-JJ."""
+        if error := teacher_scope_error(teacher_id):
+            return error
         return _dump(await planning_tools.find_impacted_entries(session, teacher_id, day))
 
     @tool
@@ -147,6 +187,14 @@ def build_planning_tools(session: AsyncSession) -> list[Callable[..., Any]]:
         proposed_by: str = "agent",
     ) -> str:
         """Crée une proposition de déplacement (statut proposed), sans l'appliquer."""
+        if actor_role == "teacher":
+            teacher_id = await session.scalar(
+                select(Course.teacher_id)
+                .join(ScheduleEntry, ScheduleEntry.course_id == Course.id)
+                .where(ScheduleEntry.id == entry_id)
+            )
+            if teacher_id != actor_teacher_id:
+                return _dump({"ok": False, "error": "Accès limité à vos propres séances"})
         return _dump(
             await planning_tools.propose_move_course(
                 session, entry_id, entry_date, timeslot_id, room_id, proposed_by
@@ -154,13 +202,34 @@ def build_planning_tools(session: AsyncSession) -> list[Callable[..., Any]]:
         )
 
     @tool
+    async def approve_schedule_change(change_id: int) -> str:
+        """Approuve une proposition après confirmation explicite.
+
+        Un enseignant ne peut approuver qu'un changement concernant son propre cours.
+        """
+        if error := await change_scope_error(change_id):
+            return error
+        approved_by = (
+            f"teacher:{actor_teacher_id}" if actor_role == "teacher" else "admin-agent"
+        )
+        return _dump(
+            await planning_tools.approve_schedule_change(
+                session, change_id, approved_by=approved_by
+            )
+        )
+
+    @tool
     async def apply_schedule_change(change_id: int) -> str:
         """Applique un changement UNIQUEMENT après confirmation explicite de l'utilisateur."""
+        if error := await change_scope_error(change_id):
+            return error
         return _dump(await planning_tools.apply_schedule_change(session, change_id))
 
     @tool
     async def confirm_presence(entry_id: int, teacher_id: int | None = None) -> str:
         """Confirme la présence du professeur pour une séance (réponse au rappel J-n)."""
+        if actor_role == "teacher" and teacher_id != actor_teacher_id:
+            return _dump({"ok": False, "error": "teacher_id de session requis"})
         return _dump(
             await planning_tools.confirm_presence(session, entry_id, teacher_id)
         )
@@ -173,6 +242,8 @@ def build_planning_tools(session: AsyncSession) -> list[Callable[..., Any]]:
         propose_alternatives: bool = True,
     ) -> str:
         """Annule une séance et propose éventuellement d'autres créneaux de report."""
+        if actor_role == "teacher" and teacher_id != actor_teacher_id:
+            return _dump({"ok": False, "error": "teacher_id de session requis"})
         return _dump(
             await planning_tools.cancel_course(
                 session,
@@ -200,6 +271,8 @@ def build_planning_tools(session: AsyncSession) -> list[Callable[..., Any]]:
         teacher_id: int, week_start: str | None = None
     ) -> str:
         """Génère le PDF d'emploi du temps d'un enseignant (week_start optionnel AAAA-MM-JJ)."""
+        if error := teacher_scope_error(teacher_id):
+            return error
         return _dump(
             await planning_tools.generate_teacher_schedule_pdf(
                 session, teacher_id, week_start
@@ -217,7 +290,129 @@ def build_planning_tools(session: AsyncSession) -> list[Callable[..., Any]]:
             )
         )
 
-    return [
+    @tool
+    async def preview_availability_form_delivery(
+        teacher_id: int,
+        channel: str = "both",
+    ) -> str:
+        """Prévisualise l'envoi du formulaire sans envoyer de message."""
+        if actor_role != "admin":
+            return _dump({"ok": False, "error": "Action réservée à l'administration"})
+        teacher = await session.get(Teacher, teacher_id)
+        form_url = await get_availability_form_url(session)
+        if teacher is None:
+            return _dump({"ok": False, "error": "Enseignant introuvable"})
+        return _dump({
+            "ok": bool(form_url),
+            "teacher_id": teacher.id,
+            "teacher_name": teacher.name,
+            "email": teacher.email,
+            "phone_whatsapp": teacher.phone_whatsapp,
+            "channel": channel,
+            "form_url": form_url,
+            "error": None if form_url else "Lien de formulaire non configuré",
+        })
+
+    @tool
+    async def send_availability_form(
+        teacher_id: int,
+        channel: str,
+        approved_by: str,
+    ) -> str:
+        """Envoie le formulaire après confirmation explicite d'un administrateur."""
+        if actor_role != "admin":
+            return _dump({"ok": False, "error": "Action réservée à l'administration"})
+        if channel not in {"email", "whatsapp", "both"}:
+            return _dump({"ok": False, "error": "Canal invalide"})
+        if not approved_by.strip():
+            return _dump({"ok": False, "error": "Validation administrateur requise"})
+        teacher = await session.get(Teacher, teacher_id)
+        form_url = await get_availability_form_url(session)
+        if teacher is None or not form_url:
+            return _dump({"ok": False, "error": "Enseignant ou formulaire non configuré"})
+
+        subject = "Ascencia Keyce — formulaire de disponibilités"
+        message = (
+            f"Bonjour {teacher.name},\n\n"
+            "Merci de renseigner vos indisponibilités pour la prochaine période "
+            f"via ce formulaire : {form_url}\n\n"
+            "L'administration validera les données avant génération du planning."
+        )
+        deliveries: dict[str, Any] = {}
+        if channel in {"email", "both"}:
+            deliveries["email"] = await EmailClient().send(teacher.email, subject, message)
+        if channel in {"whatsapp", "both"}:
+            if not teacher.phone_whatsapp:
+                deliveries["whatsapp"] = {"ok": False, "error": "Numéro manquant"}
+            else:
+                deliveries["whatsapp"] = await WhatsAppClient().send_text(
+                    teacher.phone_whatsapp, message
+                )
+        session.add(AuditLog(action="availability_form_sent", payload={
+            "teacher_id": teacher.id,
+            "channel": channel,
+            "approved_by": approved_by,
+            "deliveries": deliveries,
+        }))
+        await session.commit()
+        return _dump({"ok": all(item.get("ok") for item in deliveries.values()), "deliveries": deliveries})
+
+    @tool
+    async def generate_schedule_draft(week_start: str, requested_by: str) -> str:
+        """Génère un BROUILLON d'emploi du temps pour la semaine AAAA-MM-JJ.
+        Cette action ne publie rien et reste réservée à l'administration.
+        """
+        if actor_role != "admin":
+            return _dump({"ok": False, "error": "Action réservée à l'administration"})
+        item = await ScheduleGenerationService(session).generate_draft(
+            date.fromisoformat(week_start), created_by=requested_by
+        )
+        return _dump({
+            "ok": True,
+            "publication_id": item.id,
+            "version": item.version_number,
+            "status": item.status.value,
+            "report": item.generation_report,
+            "notice": "Brouillon uniquement : publication humaine requise dans le back-office.",
+        })
+
+    @tool
+    async def list_schedule_publications() -> str:
+        """Liste les versions de planning, leurs statuts et rapports de génération."""
+        if actor_role != "admin":
+            return _dump({"ok": False, "error": "Action réservée à l'administration"})
+        rows = await ScheduleGenerationService(session).list_publications()
+        return _dump({
+            "ok": True,
+            "publications": [
+                {
+                    "id": item.id,
+                    "version": item.version_number,
+                    "week_start": item.week_start,
+                    "status": item.status.value,
+                    "report": item.generation_report,
+                }
+                for item in rows
+            ],
+        })
+
+    @tool
+    async def run_autonomous_workflow(week_start: str | None = None) -> str:
+        """Fait avancer le cycle autonome de collecte, génération et publication.
+
+        La publication n'a lieu que si AUTONOMOUS_PUBLISH_ENABLED=true et si
+        tous les enseignants concernés ont confirmé le brouillon.
+        """
+        if actor_role != "admin":
+            return _dump({"ok": False, "error": "Action réservée à l'administration"})
+        parsed = date.fromisoformat(week_start) if week_start else None
+        return _dump(
+            await AutonomousWorkflowService(session).run_once(
+                parsed, initiated_by="admin-agent"
+            )
+        )
+
+    admin_tools = [
         list_teachers,
         list_rooms,
         list_courses,
@@ -230,10 +425,33 @@ def build_planning_tools(session: AsyncSession) -> list[Callable[..., Any]]:
         find_available_slots,
         detect_conflicts,
         propose_move_course,
+        approve_schedule_change,
         apply_schedule_change,
         confirm_presence,
         cancel_course,
         get_teacher_actions_history,
         generate_teacher_schedule_pdf,
         generate_group_schedule_pdf,
+        preview_availability_form_delivery,
+        send_availability_form,
+        generate_schedule_draft,
+        list_schedule_publications,
+        run_autonomous_workflow,
+    ]
+    if actor_role != "teacher":
+        return admin_tools
+    return [
+        get_teacher,
+        get_teacher_schedule,
+        get_teacher_availability,
+        update_teacher_availability,
+        find_impacted_entries,
+        find_available_slots,
+        detect_conflicts,
+        propose_move_course,
+        approve_schedule_change,
+        apply_schedule_change,
+        confirm_presence,
+        cancel_course,
+        generate_teacher_schedule_pdf,
     ]

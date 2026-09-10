@@ -328,6 +328,79 @@ class PlanningService:
             for c in detect_conflicts(candidate, occupied, blocks)
         ]
 
+    async def validate_schedule_entry(
+        self,
+        *,
+        course_id: int,
+        room_id: int,
+        timeslot_id: int,
+        entry_date: date,
+        ignore_entry_id: int | None = None,
+    ) -> list[dict[str, str]]:
+        """Contrôle une création ou une modification manuelle avant écriture."""
+        course = await self.session.scalar(
+            select(Course)
+            .where(Course.id == course_id)
+            .options(selectinload(Course.group), selectinload(Course.teacher))
+        )
+        room = await self.session.get(Room, room_id)
+        slot = await self.session.get(TimeSlot, timeslot_id)
+        if course is None:
+            raise ValueError("Cours introuvable")
+        if room is None:
+            raise ValueError("Salle introuvable")
+        if slot is None:
+            raise ValueError("Créneau introuvable")
+        if slot.day_of_week != entry_date.weekday():
+            return [{
+                "code": "timeslot_day_mismatch",
+                "message": "Le jour de la date ne correspond pas au jour du créneau.",
+            }]
+
+        slot_minutes = (
+            slot.end_time.hour * 60
+            + slot.end_time.minute
+            - slot.start_time.hour * 60
+            - slot.start_time.minute
+        )
+        if course.duration_minutes > slot_minutes:
+            return [{
+                "code": "course_too_long",
+                "message": (
+                    f"Le cours dure {course.duration_minutes} minutes, mais le créneau "
+                    f"n'en contient que {slot_minutes}."
+                ),
+            }]
+
+        exact_stmt = select(ScheduleEntry.id).where(
+            ScheduleEntry.room_id == room_id,
+            ScheduleEntry.timeslot_id == timeslot_id,
+            ScheduleEntry.entry_date == entry_date,
+        )
+        if ignore_entry_id is not None:
+            exact_stmt = exact_stmt.where(ScheduleEntry.id != ignore_entry_id)
+        if await self.session.scalar(exact_stmt):
+            return [{
+                "code": "room_slot_reserved",
+                "message": "Cette salle possède déjà une séance pour ce créneau.",
+            }]
+
+        occupied = await self._occupied_entries(entry_date, entry_date)
+        blocks = await self._blocking_availabilities(course.teacher_id)
+        candidate = CandidateCheck(
+            teacher_id=course.teacher_id,
+            group_id=course.group_id,
+            room_id=room.id,
+            room_capacity=room.capacity,
+            student_count=course.group.student_count,
+            window=SlotWindow(entry_date, slot.start_time, slot.end_time),
+            ignore_entry_id=ignore_entry_id,
+        )
+        return [
+            {"code": conflict.code, "message": conflict.message}
+            for conflict in detect_conflicts(candidate, occupied, blocks)
+        ]
+
     async def propose_move_course(
         self,
         entry_id: int,
@@ -379,21 +452,25 @@ class PlanningService:
         change = await self.session.get(ScheduleChange, change_id)
         if change is None:
             raise ValueError(f"Changement #{change_id} introuvable")
-        if change.status not in {
-            ScheduleChangeStatus.proposed,
-            ScheduleChangeStatus.approved,
-        }:
+        if change.status != ScheduleChangeStatus.approved:
             raise ValueError(
-                f"Changement #{change_id} non applicable (statut={change.status.value})"
+                f"Changement #{change_id} non applicable : une approbation humaine "
+                "est obligatoire avant l'application."
             )
-
-        # Pour le POC: proposed peut être appliqué après confirmation agent
-        # (approve explicite admin reste disponible à l'étape API).
         entry = await self._load_entry(change.entry_id)
         if entry is None:
             raise ValueError("Séance liée introuvable")
 
         after = change.after_json
+        conflicts = await self.detect_conflicts_for_move(
+            change.entry_id,
+            date.fromisoformat(after["entry_date"]),
+            int(after["timeslot_id"]),
+            int(after["room_id"]),
+        )
+        if conflicts:
+            messages = "; ".join(item["message"] for item in conflicts)
+            raise ValueError(f"Le changement n'est plus applicable : {messages}")
         entry.entry_date = date.fromisoformat(after["entry_date"])
         entry.timeslot_id = int(after["timeslot_id"])
         entry.room_id = int(after["room_id"])
@@ -421,7 +498,9 @@ class PlanningService:
             "entry": self._serialize_entry(entry),
         }
 
-    async def approve_schedule_change(self, change_id: int) -> dict[str, Any]:
+    async def approve_schedule_change(
+        self, change_id: int, *, approved_by: str = "admin"
+    ) -> dict[str, Any]:
         change = await self.session.get(ScheduleChange, change_id)
         if change is None:
             raise ValueError(f"Changement #{change_id} introuvable")
@@ -429,8 +508,19 @@ class PlanningService:
             raise ValueError("Seuls les changements proposed peuvent être approuvés")
         change.status = ScheduleChangeStatus.approved
         change.decided_at = datetime.now(timezone.utc)
+        self.session.add(
+            AuditLog(
+                action="approve_schedule_change",
+                payload={"change_id": change_id, "approved_by": approved_by},
+            )
+        )
         await self.session.commit()
-        return await self.apply_schedule_change(change_id)
+        return {
+            "ok": True,
+            "change_id": change_id,
+            "status": change.status.value,
+            "approved_by": approved_by,
+        }
 
     async def confirm_presence(
         self, entry_id: int, teacher_id: int | None = None

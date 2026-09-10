@@ -4,107 +4,92 @@
   <meta charset="utf-8" />
   <title>{{ title }}</title>
   <style>
-    @page {
-      size: A4 landscape;
-      margin: 18mm 14mm;
-    }
-    body {
-      font-family: "Segoe UI", DejaVu Sans, Arial, sans-serif;
-      color: #1a1a1a;
-      font-size: 11pt;
-    }
-    header {
-      border-bottom: 3px solid #0b4f6c;
-      padding-bottom: 10px;
-      margin-bottom: 18px;
-    }
-    .brand {
-      font-size: 20pt;
-      font-weight: 700;
-      color: #0b4f6c;
-      margin: 0;
-    }
-    .meta {
-      color: #445;
-      margin-top: 6px;
-      line-height: 1.4;
-    }
-    h1 {
-      font-size: 14pt;
-      margin: 0 0 12px 0;
-    }
-    table {
-      width: 100%;
-      border-collapse: collapse;
-    }
-    th, td {
-      border: 1px solid #c9d3da;
-      padding: 8px 10px;
-      text-align: left;
-      vertical-align: top;
-    }
-    th {
-      background: #0b4f6c;
-      color: #fff;
-      font-weight: 600;
-    }
-    tr:nth-child(even) td {
-      background: #f4f7f9;
-    }
-    .empty {
-      padding: 24px;
-      border: 1px dashed #99a;
-      color: #556;
-      text-align: center;
-    }
-    footer {
-      margin-top: 16px;
-      font-size: 9pt;
-      color: #667;
-    }
+    @page { size: A4 landscape; margin: 10mm 12mm 12mm; }
+    body { font-family: "Times New Roman", DejaVu Serif, serif; color: #111; font-size: 9.5pt; margin: 0; }
+    header { text-align: center; margin-bottom: 7mm; }
+    .logo { width: 47mm; height: 22mm; object-fit: contain; margin-bottom: 1mm; }
+    h1 { margin: 0; color: #29469b; font-size: 21pt; line-height: 1; letter-spacing: .2px; }
+    .week { margin: 2mm 0 0; color: #ef5713; font-weight: 700; font-size: 14pt; }
+    .audience { margin: 1mm 0 0; font-weight: 700; font-size: 12pt; text-transform: uppercase; }
+    .semester { margin-top: 1mm; color: #3c465d; font-size: 9pt; }
+    table { width: 100%; border-collapse: collapse; table-layout: fixed; }
+    th, td { border: 1.5px solid #171717; text-align: center; vertical-align: middle; }
+    th { padding: 2.2mm 1mm; background: #fff; font-weight: 700; font-size: 10pt; }
+    th.time-column { width: 25mm; }
+    th .date { display: block; margin-top: .8mm; font-size: 8.5pt; }
+    td.time { width: 25mm; padding: 2mm 1mm; font-weight: 700; background: #fff; }
+    td.time .duration { display: block; margin-top: 2mm; font-size: 8pt; }
+    td.slot { height: 25mm; padding: 1.5mm 1mm; background: #fff; }
+    td.empty { background: #bbb9ba; }
+    td.complete { background: #e3efd9; }
+    .course { font-size: 9.7pt; line-height: 1.2; }
+    .room { margin-top: 1mm; font-size: 8pt; color: #3c465d; }
+    .progress { margin-top: 2mm; font-size: 8.5pt; }
+    .teacher { border-top: 1px solid #555; margin: 1mm -1mm -1.5mm; padding-top: .8mm; font-size: 8.5pt; }
+    tr.pause-row td { height: 5mm; padding: 0; }
+    td.pause { background: #dce4f2; font-weight: 700; letter-spacing: .5px; }
+    .empty-message { padding: 12mm; border: 1.5px dashed #75809a; text-align: center; color: #59637a; }
+    footer { margin-top: 8mm; display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 10mm; }
+    .notice { text-align: center; font-style: italic; font-size: 9pt; line-height: 1.35; }
+    .signature { min-width: 45mm; text-align: center; line-height: 1.5; }
+    .generated { margin-top: 2mm; color: #687086; font-size: 7.5pt; }
   </style>
 </head>
 <body>
   <header>
-    <p class="brand">{{ university_name }}</p>
-    <div class="meta">
-      {{ semester_label }}<br />
-      Semaine du {{ week_label }}<br />
-      Généré le {{ generated_at }}
-    </div>
+    <img class="logo" src="logo-ak.png" alt="Ascencia Keyce" />
+    <h1>EMPLOI DU TEMPS</h1>
+    <p class="week">Semaine du {{ week_label }}</p>
+    <p class="audience">{{ audience_label }} — {{ audience_name }}</p>
+    <div class="semester">{{ semester_label }}</div>
   </header>
 
-  <h1>{{ title }}</h1>
-
-  {% if entries %}
+  {% if rows %}
   <table>
     <thead>
       <tr>
-        <th>Date</th>
-        <th>Créneau</th>
-        <th>Cours</th>
-        <th>Enseignant</th>
-        <th>Groupe</th>
-        <th>Salle</th>
+        <th class="time-column">Plage horaire</th>
+        {% for day in days %}
+        <th>{{ day.name }}<span class="date">{{ day.date_label }}</span></th>
+        {% endfor %}
       </tr>
     </thead>
     <tbody>
-      {% for e in entries %}
-      <tr>
-        <td>{{ e.entry_date }}</td>
-        <td>{{ e.timeslot_label }}</td>
-        <td>{{ e.course_title }}</td>
-        <td>{{ e.teacher_name }}</td>
-        <td>{{ e.group_name }}</td>
-        <td>{{ e.room_name }}</td>
-      </tr>
+      {% for row in rows %}
+        {% if row.kind == "pause" %}
+        <tr class="pause-row">
+          <td class="time">{{ row.label }}</td>
+          <td class="pause" colspan="{{ days|length }}">PAUSE</td>
+        </tr>
+        {% else %}
+        <tr>
+          <td class="time">{{ row.label }}<span class="duration">({{ row.duration }})</span></td>
+          {% for cell in row.cells %}
+          <td class="slot {% if not cell %}empty{% elif cell[0].is_complete %}complete{% endif %}">
+            {% for entry in cell %}
+            <div class="course">{{ entry.course_title }}</div>
+            <div class="room">{{ entry.room_name }}</div>
+            <div class="progress">{{ entry.session_progress }}</div>
+            <div class="teacher">{{ entry.teacher_name }}</div>
+            {% if not loop.last %}<hr />{% endif %}
+            {% endfor %}
+          </td>
+          {% endfor %}
+        </tr>
+        {% endif %}
       {% endfor %}
     </tbody>
   </table>
   {% else %}
-  <div class="empty">Aucune séance planifiée pour cette période.</div>
+  <div class="empty-message">Aucune séance planifiée pour cette période.</div>
   {% endif %}
 
-  <footer>{{ entries|length }} séance(s) — Geminia Schedule POC</footer>
+  <footer>
+    <div class="notice">
+      <strong>NB :</strong> Cet emploi du temps est susceptible d'évoluer selon les disponibilités des intervenants.
+      <div class="generated">Document généré automatiquement le {{ generated_at }} — {{ entries_count }} séance(s).</div>
+    </div>
+    <div class="signature">La Direction académique</div>
+  </footer>
 </body>
 </html>

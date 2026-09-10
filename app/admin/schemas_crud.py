@@ -1,9 +1,9 @@
-from datetime import date
+from datetime import date, time
 from typing import Any
 
-from pydantic import BaseModel, EmailStr, Field
+from pydantic import BaseModel, EmailStr, Field, model_validator
 
-from app.domain.models import ScheduleChangeStatus, ScheduleEntryStatus
+from app.domain.models import PublicationStatus, ScheduleChangeStatus, ScheduleEntryStatus
 
 
 class LevelIn(BaseModel):
@@ -34,7 +34,8 @@ class TeacherOut(TeacherIn):
 class GroupIn(BaseModel):
     name: str
     whatsapp_group_id: str | None = None
-    student_count: int = 0
+    distribution_recipients: list[str] = Field(default_factory=list)
+    student_count: int = Field(default=0, ge=0, le=2000)
     academic_level_id: int | None = None
 
 
@@ -45,7 +46,7 @@ class GroupOut(GroupIn):
 
 class RoomIn(BaseModel):
     name: str
-    capacity: int = 30
+    capacity: int = Field(default=30, ge=1, le=5000)
 
 
 class RoomOut(RoomIn):
@@ -57,8 +58,11 @@ class CourseIn(BaseModel):
     title: str
     teacher_id: int
     group_id: int
-    duration_minutes: int = 120
-    planned_minutes: int = 720
+    duration_minutes: int = Field(default=120, ge=15, le=720)
+    planned_minutes: int = Field(default=720, ge=15, le=100000)
+    semester: int = Field(default=1, ge=1, le=2)
+    priority: int = Field(default=0, ge=0, le=100)
+    prerequisite_course_id: int | None = Field(default=None, gt=0)
 
 
 class CourseOut(CourseIn):
@@ -74,9 +78,17 @@ class CourseOut(CourseIn):
 
 class TimeSlotIn(BaseModel):
     day_of_week: int = Field(ge=0, le=6)
-    start_time: str  # HH:MM
-    end_time: str
-    label: str
+    start_time: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    end_time: str = Field(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")
+    label: str = Field(min_length=2, max_length=80)
+
+    @model_validator(mode="after")
+    def validate_time_order(self) -> "TimeSlotIn":
+        start = time.fromisoformat(self.start_time)
+        end = time.fromisoformat(self.end_time)
+        if end <= start:
+            raise ValueError("L'heure de fin doit être postérieure à l'heure de début")
+        return self
 
 
 class TimeSlotOut(BaseModel):
@@ -89,9 +101,9 @@ class TimeSlotOut(BaseModel):
 
 
 class ScheduleEntryIn(BaseModel):
-    course_id: int
-    room_id: int
-    timeslot_id: int
+    course_id: int = Field(gt=0)
+    room_id: int = Field(gt=0)
+    timeslot_id: int = Field(gt=0)
     entry_date: date
     status: ScheduleEntryStatus = ScheduleEntryStatus.scheduled
 
@@ -122,6 +134,29 @@ class ChangeOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class PublicationDraftIn(BaseModel):
+    week_start: date
+
+
+class PublicationPublishIn(BaseModel):
+    force_presence_override: bool = False
+
+
+class PublicationOut(BaseModel):
+    id: int
+    version_number: str
+    week_start: date
+    week_end: date
+    status: PublicationStatus
+    snapshot_json: list[dict[str, Any]]
+    generation_report: dict[str, Any]
+    created_by: str
+    published_by: str | None = None
+    created_at: str | None = None
+    published_at: str | None = None
+    xlsx_path: str | None = None
+
+
 class ConfigItem(BaseModel):
     key: str
     value: str
@@ -134,8 +169,16 @@ class ConfigUpdate(BaseModel):
 
 class DashboardOut(BaseModel):
     teachers_count: int
+    active_teachers_count: int
+    teachers_with_whatsapp: int
+    availability_responses_count: int
+    collection_progress_percent: int
+    whatsapp_coverage_percent: int
     courses_count: int
     groups_count: int
     rooms_count: int
     pending_changes: int
+    approved_changes: int
     scheduled_this_week: int
+    cancelled_this_week: int
+    whatsapp_conversations_count: int

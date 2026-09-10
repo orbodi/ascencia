@@ -10,7 +10,7 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div className="flex items-start justify-between gap-4 mb-8 animate-fade-up">
+    <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-6 md:mb-8 animate-fade-up">
       <div>
         <h1 className="font-[family-name:var(--font-display)] text-[2rem] leading-tight tracking-tight text-ink md:text-[2.35rem]">
           {title}
@@ -21,7 +21,11 @@ export function PageHeader({
           </p>
         ) : null}
       </div>
-      {actions ? <div className="shrink-0 flex items-center gap-2">{actions}</div> : null}
+      {actions ? (
+        <div className="w-full sm:w-auto shrink-0 flex flex-wrap items-center gap-2">
+          {actions}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -51,10 +55,10 @@ export function Button({
   variant?: "primary" | "ghost" | "danger";
 }) {
   const base =
-    "inline-flex items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold transition duration-150 disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98]";
+    "inline-flex min-h-11 items-center justify-center rounded-xl px-4 py-2.5 text-sm font-semibold transition duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-accent focus-visible:ring-offset-2 disabled:opacity-50 disabled:pointer-events-none active:scale-[0.98]";
   const styles = {
     primary:
-      "bg-accent text-white hover:bg-accent-deep shadow-[0_1px_0_rgba(8,85,68,0.25)]",
+      "bg-accent text-white hover:bg-accent-deep shadow-[0_1px_0_rgba(116,42,5,0.25)]",
     ghost: "bg-mist/80 text-ink hover:bg-mist border border-line/60",
     danger: "bg-warn text-white hover:bg-warn/90",
   }[variant];
@@ -66,7 +70,7 @@ export function Button({
 }
 
 const fieldClass =
-  "w-full rounded-xl border border-line bg-white/90 px-3.5 py-2.5 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/15";
+  "w-full min-h-11 rounded-xl border border-line bg-white/90 px-3.5 py-2.5 outline-none transition focus:border-accent focus:ring-2 focus:ring-accent/20";
 
 export function Input(
   props: React.InputHTMLAttributes<HTMLInputElement> & { label?: string }

@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -26,9 +28,10 @@ async def agent_chat(
             detail=str(exc),
         ) from exc
     except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).exception("Échec du chat d'intégration")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Erreur agent: {exc}",
+            detail="L'assistant n'a pas pu traiter la demande.",
         ) from exc
 
     return ChatResponse(**result)

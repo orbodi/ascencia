@@ -27,11 +27,13 @@ export function ConfigPage() {
   const promptRow = data.find((c) => c.key === "agent_system_prompt");
   const modelRow = data.find((c) => c.key === "gemini_model");
   const daysRow = data.find((c) => c.key === "reminder_days_ahead");
+  const formUrlRow = data.find((c) => c.key === "availability_form_url");
 
   const [agentName, setAgentName] = useState("Ascencia");
   const [prompt, setPrompt] = useState("");
   const [model, setModel] = useState(MODELS[0]);
   const [days, setDays] = useState("3");
+  const [formUrl, setFormUrl] = useState("");
   const [saved, setSaved] = useState(false);
 
   useEffect(() => {
@@ -39,7 +41,8 @@ export function ConfigPage() {
     if (promptRow) setPrompt(promptRow.value);
     if (modelRow) setModel(modelRow.value);
     if (daysRow) setDays(daysRow.value);
-  }, [nameRow, promptRow, modelRow, daysRow]);
+    if (formUrlRow) setFormUrl(formUrlRow.value);
+  }, [nameRow, promptRow, modelRow, daysRow, formUrlRow]);
 
   const save = useMutation({
     mutationFn: async () => {
@@ -60,6 +63,10 @@ export function ConfigPage() {
         method: "PUT",
         body: JSON.stringify({ value: days }),
       });
+      await api(`/admin/config/availability_form_url`, {
+        method: "PUT",
+        body: JSON.stringify({ value: formUrl.trim() }),
+      });
     },
     onSuccess: () => {
       setSaved(true);
@@ -77,7 +84,7 @@ export function ConfigPage() {
     <div>
       <PageHeader
         title="Config IA"
-        subtitle="Nom de l'assistant, prompt, modèle Gemini et rappels"
+        subtitle="Identité, comportement, formulaire de collecte et modèle IA"
       />
       <Card className="p-6 max-w-4xl">
         <form className="space-y-5" onSubmit={onSubmit}>
@@ -119,6 +126,16 @@ export function ConfigPage() {
               onChange={(e) => setDays(e.target.value)}
             />
           </div>
+          <Input
+            label="Lien du formulaire de disponibilités"
+            type="url"
+            value={formUrl}
+            onChange={(e) => setFormUrl(e.target.value)}
+            placeholder="https://forms.example.com/disponibilites"
+          />
+          <p className="text-xs text-ink-soft -mt-3">
+            L’agent peut transmettre ce formulaire par e-mail ou WhatsApp après validation explicite d’un administrateur.
+          </p>
           <div className="flex items-center gap-3">
             <Button disabled={save.isPending}>
               {save.isPending ? "Enregistrement…" : "Enregistrer"}

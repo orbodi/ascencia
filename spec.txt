@@ -1,19 +1,20 @@
-# POC — Assistant IA de gestion des emplois du temps (version resserrée)
+# POC — Génération et publication intelligente des emplois du temps
 
 ## Objectif du POC
 
-Prouver un seul parcours bout-en-bout :
+Prouver deux parcours cohérents et traçables :
 
-1. Un enseignant signale une indisponibilité (chat / WhatsApp).
-2. L’agent lit le planning, détecte les cours impactés et propose des solutions.
-3. Un humain valide une proposition.
-4. Le système met à jour PostgreSQL, régénère un PDF, notifie les concernés.
+1. Collecter ou enregistrer les contraintes académiques et les indisponibilités.
+2. Générer un brouillon hebdomadaire par règles fortes et score heuristique.
+3. Faire expliquer le résultat et les éventuelles séances non placées par l’agent IA.
+4. Faire contrôler et publier la version par un administrateur authentifié.
+5. Gérer ensuite une indisponibilité, proposer un report et appliquer uniquement une modification approuvée.
 
-Hors scope POC (phase 2) :
-- génération / optimisation globale d’un EDT complet ;
-- Excel / CSV / HTML (garder PDF seulement) ;
-- architecture hexagonale / SaaS multi-tenant ;
-- dialogue étudiants avec l’IA.
+Hors scope de cette version :
+- optimisation mathématique globale par solveur spécialisé ;
+- import Excel / CSV complet ;
+- SaaS multi-tenant ;
+- dialogue direct des étudiants avec l’IA.
 
 Contexte volume : ~14 enseignants, ~400 étudiants (les étudiants reçoivent seulement le PDF dans le groupe WhatsApp promo).
 
@@ -131,7 +132,8 @@ Historique
 - save_conversation
 - audit_log
 
-Pas de `generate_schedule` / `optimize_schedule` dans le POC.
+Outils ajoutés : `generate_schedule_draft` et `list_schedule_publications`.
+La publication reste volontairement exclue des outils de l’agent et doit être confirmée dans le back-office.
 
 ---
 

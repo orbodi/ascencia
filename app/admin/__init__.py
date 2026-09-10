@@ -1,6 +1,7 @@
 from fastapi import APIRouter
 
 from app.admin.routes import (
+    autonomy,
     auth_routes,
     changes,
     chat,
@@ -8,18 +9,25 @@ from app.admin.routes import (
     courses,
     dashboard,
     groups,
+    history_admin,
     levels,
+    publications,
+    presence_campaigns,
     rooms,
     schedule,
     teachers,
 )
 
 admin_router = APIRouter()
+admin_router.include_router(autonomy.router)
 admin_router.include_router(auth_routes.router)
 admin_router.include_router(dashboard.router)
 admin_router.include_router(levels.router)
+admin_router.include_router(publications.router)
+admin_router.include_router(presence_campaigns.router)
 admin_router.include_router(teachers.router)
 admin_router.include_router(groups.router)
+admin_router.include_router(history_admin.router)
 admin_router.include_router(rooms.router)
 admin_router.include_router(courses.router)
 admin_router.include_router(schedule.router)

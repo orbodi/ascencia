@@ -40,11 +40,25 @@ async def list_changes(
 @router.post("/{change_id}/approve")
 async def approve_change(
     change_id: int,
+    user: AdminUser = Depends(require_admin_write),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    try:
+        return await PlanningService(session).approve_schedule_change(
+            change_id, approved_by=user.username
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@router.post("/{change_id}/apply")
+async def apply_change(
+    change_id: int,
     _user: AdminUser = Depends(require_admin_write),
     session: AsyncSession = Depends(get_db),
 ) -> dict:
     try:
-        return await PlanningService(session).approve_schedule_change(change_id)
+        return await PlanningService(session).apply_schedule_change(change_id)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

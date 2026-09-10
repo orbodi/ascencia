@@ -35,6 +35,32 @@ class ScheduleChangeStatus(str, enum.Enum):
     applied = "applied"
 
 
+class PublicationStatus(str, enum.Enum):
+    draft = "draft"
+    published = "published"
+    archived = "archived"
+
+
+class PresenceCampaignStatus(str, enum.Enum):
+    open = "open"
+    ready = "ready"
+    requires_revision = "requires_revision"
+    completed = "completed"
+
+
+class PresenceResponseStatus(str, enum.Enum):
+    pending = "pending"
+    confirmed = "confirmed"
+    unavailable = "unavailable"
+
+
+class DeliveryStatus(str, enum.Enum):
+    pending = "pending"
+    sent = "sent"
+    failed = "failed"
+    skipped = "skipped"
+
+
 class AdminRole(str, enum.Enum):
     superadmin = "superadmin"
     admin = "admin"
@@ -114,6 +140,9 @@ class StudentGroup(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     name: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
     whatsapp_group_id: Mapped[Optional[str]] = mapped_column(String(64))
+    distribution_recipients: Mapped[list[str]] = mapped_column(
+        JSON, default=list, nullable=False
+    )
     student_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
     academic_level_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("academic_levels.id"), nullable=True
@@ -167,11 +196,19 @@ class Course(Base):
     )
     duration_minutes: Mapped[int] = mapped_column(Integer, default=120, nullable=False)
     planned_minutes: Mapped[int] = mapped_column(Integer, default=720, nullable=False)
+    semester: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    priority: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    prerequisite_course_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("courses.id"), nullable=True
+    )
 
     teacher: Mapped[Teacher] = relationship(back_populates="courses")
     group: Mapped[StudentGroup] = relationship(back_populates="courses")
     schedule_entries: Mapped[list[ScheduleEntry]] = relationship(
         back_populates="course"
+    )
+    prerequisite: Mapped[Optional[Course]] = relationship(
+        remote_side="Course.id", foreign_keys=[prerequisite_course_id]
     )
 
 
@@ -260,6 +297,141 @@ class ConversationHistory(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+
+
+class ProcessedInboundMessage(Base):
+    """Reçu technique empêchant le retraitement d'un webhook déjà livré."""
+
+    __tablename__ = "processed_inbound_messages"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    channel: Mapped[str] = mapped_column(String(40), nullable=False)
+    message_id: Mapped[str] = mapped_column(String(180), unique=True, nullable=False)
+    sender_id: Mapped[str] = mapped_column(String(80), nullable=False)
+    processed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+
+
+class SchedulePublication(Base):
+    """Version traçable d'un planning généré pour une semaine."""
+
+    __tablename__ = "schedule_publications"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    version_number: Mapped[str] = mapped_column(String(60), unique=True, nullable=False)
+    week_start: Mapped[date] = mapped_column(Date, nullable=False)
+    week_end: Mapped[date] = mapped_column(Date, nullable=False)
+    status: Mapped[PublicationStatus] = mapped_column(
+        Enum(
+            PublicationStatus,
+            name="publication_status",
+            native_enum=True,
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+        ),
+        default=PublicationStatus.draft,
+        nullable=False,
+    )
+    snapshot_json: Mapped[list[dict[str, Any]]] = mapped_column(JSON, nullable=False)
+    generation_report: Mapped[dict[str, Any]] = mapped_column(JSON, nullable=False)
+    created_by: Mapped[str] = mapped_column(String(80), nullable=False)
+    published_by: Mapped[Optional[str]] = mapped_column(String(80))
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    published_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    xlsx_path: Mapped[Optional[str]] = mapped_column(String(500))
+
+
+class PresenceCampaign(Base):
+    __tablename__ = "presence_campaigns"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    publication_id: Mapped[int] = mapped_column(
+        ForeignKey("schedule_publications.id"), unique=True, nullable=False
+    )
+    status: Mapped[PresenceCampaignStatus] = mapped_column(
+        Enum(
+            PresenceCampaignStatus,
+            name="presence_campaign_status",
+            native_enum=True,
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+        ),
+        default=PresenceCampaignStatus.open,
+        nullable=False,
+    )
+    channels: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    deadline_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    created_by: Mapped[str] = mapped_column(String(80), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+
+
+class PresenceRequest(Base):
+    __tablename__ = "presence_requests"
+    __table_args__ = (
+        UniqueConstraint(
+            "campaign_id", "teacher_id", name="uq_presence_campaign_teacher"
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    campaign_id: Mapped[int] = mapped_column(
+        ForeignKey("presence_campaigns.id"), nullable=False
+    )
+    teacher_id: Mapped[int] = mapped_column(ForeignKey("teachers.id"), nullable=False)
+    token: Mapped[str] = mapped_column(String(80), unique=True, nullable=False)
+    status: Mapped[PresenceResponseStatus] = mapped_column(
+        Enum(
+            PresenceResponseStatus,
+            name="presence_response_status",
+            native_enum=True,
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+        ),
+        default=PresenceResponseStatus.pending,
+        nullable=False,
+    )
+    sent_channels: Mapped[list[str]] = mapped_column(JSON, default=list, nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, default=0, nullable=False)
+    last_sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    responded_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
+    response_channel: Mapped[Optional[str]] = mapped_column(String(30))
+    response_text: Mapped[Optional[str]] = mapped_column(Text)
+
+
+class DistributionDelivery(Base):
+    __tablename__ = "distribution_deliveries"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    publication_id: Mapped[int] = mapped_column(
+        ForeignKey("schedule_publications.id"), nullable=False
+    )
+    group_id: Mapped[int] = mapped_column(
+        ForeignKey("student_groups.id"), nullable=False
+    )
+    channel: Mapped[str] = mapped_column(String(40), nullable=False)
+    recipient: Mapped[str] = mapped_column(String(120), nullable=False)
+    status: Mapped[DeliveryStatus] = mapped_column(
+        Enum(
+            DeliveryStatus,
+            name="delivery_status",
+            native_enum=True,
+            values_callable=lambda enum_cls: [item.value for item in enum_cls],
+        ),
+        default=DeliveryStatus.pending,
+        nullable=False,
+    )
+    artifact_path: Mapped[Optional[str]] = mapped_column(String(500))
+    provider_response: Mapped[dict[str, Any]] = mapped_column(
+        JSON, default=dict, nullable=False
+    )
+    error: Mapped[Optional[str]] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    sent_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True))
 
 
 class AuditLog(Base):

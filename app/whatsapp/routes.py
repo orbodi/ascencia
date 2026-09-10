@@ -26,6 +26,12 @@ class TestSendRequest(BaseModel):
     message: str = Field(min_length=1, max_length=4096)
 
 
+class TestTemplateRequest(BaseModel):
+    to: str = Field(description="Numéro destinataire au format international")
+    template_name: str = Field(min_length=1, max_length=512)
+    language_code: str = Field(default="fr", min_length=2, max_length=10)
+
+
 @router.get("")
 async def verify_webhook(
     hub_mode: str | None = Query(default=None, alias="hub.mode"),
@@ -81,3 +87,13 @@ async def receive_webhook(
 async def test_send_whatsapp(body: TestSendRequest) -> dict:
     """Envoie un message texte de test (mock ou Cloud API selon .env)."""
     return await WhatsAppClient().send_text(body.to, body.message)
+
+
+@admin_router.post("/test-template", dependencies=[Depends(require_api_token)])
+async def test_template_whatsapp(body: TestTemplateRequest) -> dict:
+    """Envoie un modèle Meta approuvé (fonctionne hors fenêtre de 24 h)."""
+    return await WhatsAppClient().send_template(
+        body.to,
+        body.template_name,
+        body.language_code,
+    )

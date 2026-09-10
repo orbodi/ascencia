@@ -149,6 +149,17 @@ async def apply_schedule_change(session: AsyncSession, change_id: int) -> dict:
         return {"ok": False, "error": str(exc)}
 
 
+async def approve_schedule_change(
+    session: AsyncSession, change_id: int, *, approved_by: str
+) -> dict:
+    try:
+        return await PlanningService(session).approve_schedule_change(
+            change_id, approved_by=approved_by
+        )
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+
+
 async def confirm_presence(
     session: AsyncSession, entry_id: int, teacher_id: int | None = None
 ) -> dict:

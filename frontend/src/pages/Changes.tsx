@@ -103,6 +103,15 @@ export function ChangesPage() {
       api(`/admin/changes/${id}/approve`, { method: "POST" }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["changes"] }),
   });
+  const applyChange = useMutation({
+    mutationFn: (id: number) =>
+      api(`/admin/changes/${id}/apply`, { method: "POST" }),
+    onSuccess: () => {
+      void qc.invalidateQueries({ queryKey: ["changes"] });
+      void qc.invalidateQueries({ queryKey: ["schedule"] });
+      void qc.invalidateQueries({ queryKey: ["dashboard"] });
+    },
+  });
   const reject = useMutation({
     mutationFn: (id: number) =>
       api(`/admin/changes/${id}/reject`, { method: "POST" }),
@@ -112,9 +121,23 @@ export function ChangesPage() {
   return (
     <div>
       <PageHeader
-        title="Notifications"
-        subtitle="Propositions de report et alertes à traiter"
+        title="Validations"
+        subtitle="Circuit supervisé : proposition, approbation humaine, puis application au planning"
       />
+      <Card className="mb-5 overflow-hidden border-brand-blue/20 bg-brand-blue-soft/40 p-4">
+        <ol className="grid gap-3 text-sm sm:grid-cols-3">
+          {["1. Proposition contrôlée", "2. Approbation humaine", "3. Application au planning"].map((step) => (
+            <li key={step} className="rounded-xl bg-white/80 px-3 py-2 font-semibold text-ink">{step}</li>
+          ))}
+        </ol>
+      </Card>
+      {approve.error || applyChange.error || reject.error ? (
+        <Card className="mb-4 border-red-200 bg-red-50 p-4 text-sm text-red-700">
+          {String((approve.error || applyChange.error || reject.error) instanceof Error
+            ? (approve.error || applyChange.error || reject.error as Error).message
+            : "L’opération n’a pas abouti.")}
+        </Card>
+      ) : null}
       <div className="space-y-3">
         {isLoading ? (
           <Card className="p-5 text-ink-soft text-sm">Chargement…</Card>
@@ -165,6 +188,20 @@ export function ChangesPage() {
                       onClick={() => reject.mutate(c.id)}
                     >
                       Rejeter
+                    </Button>
+                  </div>
+                ) : null}
+                {c.status === "approved" ? (
+                  <div className="shrink-0">
+                    <Button
+                      disabled={applyChange.isPending}
+                      onClick={() => {
+                        if (confirm("Appliquer ce changement au planning officiel ?")) {
+                          applyChange.mutate(c.id);
+                        }
+                      }}
+                    >
+                      Appliquer au planning
                     </Button>
                   </div>
                 ) : null}

@@ -1,3 +1,5 @@
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import delete, select
@@ -92,6 +94,7 @@ async def admin_chat(
             external_user_id=body.external_user_id or _user_id(user),
             channel=body.channel or CHANNEL,
             teacher_id=body.teacher_id,
+            actor_role="admin",
         )
     except RuntimeError as exc:
         raise HTTPException(
@@ -99,8 +102,9 @@ async def admin_chat(
             detail=str(exc),
         ) from exc
     except Exception as exc:  # noqa: BLE001
+        logging.getLogger(__name__).exception("Échec du chat administrateur")
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Erreur agent: {exc}",
+            detail="L'assistant n'a pas pu traiter la demande. Réessayez dans un instant.",
         ) from exc
     return ChatResponse(**result)

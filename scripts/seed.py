@@ -32,9 +32,15 @@ from app.domain.models import (
     TimeSlot,
 )
 
-WEEK_START = date(2026, 8, 3)
+TODAY = date.today()
+WEEK_START = TODAY - timedelta(days=TODAY.weekday())
 
 TABLES = [
+    "distribution_deliveries",
+    "presence_requests",
+    "presence_campaigns",
+    "processed_inbound_messages",
+    "schedule_publications",
     "audit_logs",
     "conversation_history",
     "schedule_changes",
@@ -92,6 +98,11 @@ async def ensure_admin_and_config(session) -> None:
             str(settings.reminder_days_ahead),
             "Jours avant cours pour rappel présence",
         ),
+        (
+            "availability_form_url",
+            settings.availability_form_url,
+            "Lien du formulaire de collecte des disponibilités",
+        ),
     ]
     for key, value, description in defaults:
         existing = await session.scalar(
@@ -142,47 +153,50 @@ async def seed(reset: bool = False) -> None:
 
         teachers = [
             Teacher(
-                name="Alice Martin",
-                email="alice.martin@univ-demo.fr",
-                phone_whatsapp="+33610000001",
+                name="Ama Mensah (Démo)",
+                email="ama.mensah@example.test",
+                phone_whatsapp="+22800000001",
             ),
             Teacher(
-                name="Bruno Dupont",
-                email="bruno.dupont@univ-demo.fr",
-                phone_whatsapp="+33610000002",
+                name="Koffi Lawson (Démo)",
+                email="koffi.lawson@example.test",
+                phone_whatsapp="+22800000002",
             ),
             Teacher(
-                name="Chloé Bernard",
-                email="chloe.bernard@univ-demo.fr",
-                phone_whatsapp="+33610000003",
+                name="Akouvi Agbo (Démo)",
+                email="akouvi.agbo@example.test",
+                phone_whatsapp="+22800000003",
             ),
             Teacher(
-                name="David Petit",
-                email="david.petit@univ-demo.fr",
-                phone_whatsapp="+33610000004",
+                name="Komlan Dovi (Démo)",
+                email="komlan.dovi@example.test",
+                phone_whatsapp="+22800000004",
             ),
             Teacher(
-                name="Emma Robert",
-                email="emma.robert@univ-demo.fr",
-                phone_whatsapp="+33610000005",
+                name="Yawa Adjevi (Démo)",
+                email="yawa.adjevi@example.test",
+                phone_whatsapp="+22800000005",
             ),
         ]
         groups = [
             StudentGroup(
                 name="L3 Info A",
                 whatsapp_group_id="grp_l3a",
+                distribution_recipients=["+22800000101", "+22800000102"],
                 student_count=35,
                 academic_level_id=levels[0].id,
             ),
             StudentGroup(
                 name="L3 Info B",
                 whatsapp_group_id="grp_l3b",
+                distribution_recipients=["+22800000201"],
                 student_count=32,
                 academic_level_id=levels[0].id,
             ),
             StudentGroup(
                 name="M1 IA",
                 whatsapp_group_id="grp_m1ia",
+                distribution_recipients=["+22800000301"],
                 student_count=28,
                 academic_level_id=levels[1].id,
             ),
@@ -296,7 +310,11 @@ async def seed(reset: bool = False) -> None:
             f"Seed OK — semaine du {WEEK_START.isoformat()} "
             f"({len(teachers)} profs, {len(entries)} séances)."
         )
-        print("Scénario démo : Alice Martin absente le mercredi 2026-08-05.")
+        scenario_day = WEEK_START + timedelta(days=2)
+        print(
+            "Scénario démo : Ama Mensah (Démo) indisponible le mercredi "
+            f"{scenario_day.isoformat()}."
+        )
         print(f"Back-office: {settings.admin_username} / (ADMIN_PASSWORD)")
 
 

@@ -13,6 +13,7 @@ KEY_PROMPT = "agent_system_prompt"
 KEY_MODEL = "gemini_model"
 KEY_REMINDER_DAYS = "reminder_days_ahead"
 KEY_AGENT_NAME = "agent_display_name"
+KEY_AVAILABILITY_FORM_URL = "availability_form_url"
 
 DEFAULT_AGENT_NAME = "Ascencia"
 
@@ -66,3 +67,10 @@ async def get_system_prompt(session: AsyncSession) -> str:
 async def get_gemini_model(session: AsyncSession) -> str:
     value = await get_config_value(session, KEY_MODEL)
     return value if value else settings.gemini_model
+
+
+async def get_availability_form_url(session: AsyncSession) -> str:
+    value = await get_config_value(
+        session, KEY_AVAILABILITY_FORM_URL, settings.availability_form_url
+    )
+    return (value or "").strip()

@@ -13,6 +13,9 @@ type Course = {
   planned_hours?: string;
   hours_done?: string;
   hours_remaining?: string;
+  semester: number;
+  priority: number;
+  prerequisite_course_id: number | null;
 };
 
 function progressPct(c: Course): number {
@@ -47,6 +50,7 @@ export function CoursesPage() {
               <th className="px-4 py-3">Cours</th>
               <th className="px-4 py-3">Prof</th>
               <th className="px-4 py-3">Groupe</th>
+              <th className="px-4 py-3">Règles</th>
               <th className="px-4 py-3">Progression</th>
               <th className="px-4 py-3">Prévu</th>
               <th className="px-4 py-3">Fait</th>
@@ -57,7 +61,7 @@ export function CoursesPage() {
           <tbody>
             {isLoading ? (
               <tr>
-                <td colSpan={8} className="px-4 py-4 text-ink-soft">
+                <td colSpan={9} className="px-4 py-4 text-ink-soft">
                   Chargement…
                 </td>
               </tr>
@@ -69,6 +73,7 @@ export function CoursesPage() {
                     <td className="px-4 py-3 font-medium">{c.title}</td>
                     <td className="px-4 py-3">{c.teacher_name}</td>
                     <td className="px-4 py-3">{c.group_name}</td>
+                    <td className="px-4 py-3 text-xs text-ink-soft">S{c.semester} · priorité {c.priority}{c.prerequisite_course_id ? ` · prérequis #${c.prerequisite_course_id}` : ""}</td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <div className="h-2 w-28 rounded-full bg-mist overflow-hidden">

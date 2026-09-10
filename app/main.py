@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -9,6 +10,8 @@ from fastapi.responses import FileResponse, HTMLResponse
 
 from app.api.router import api_router
 from app.config import settings
+from app.domain.db import AsyncSessionLocal
+from app.services.autonomous_workflow import AutonomousWorkflowService
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,8 +39,28 @@ DIST_DIR = _resolve_dist_dir()
 INDEX_HTML = DIST_DIR / "index.html"
 
 
+def _validate_production_settings() -> None:
+    if settings.app_env.lower() not in {"production", "prod"}:
+        return
+    unsafe: list[str] = []
+    if settings.jwt_secret.startswith("change-me"):
+        unsafe.append("JWT_SECRET")
+    if settings.api_token == "change-me":
+        unsafe.append("API_TOKEN")
+    if settings.admin_password == "admin123":
+        unsafe.append("ADMIN_PASSWORD")
+    if not settings.whatsapp_mock and not settings.whatsapp_app_secret:
+        unsafe.append("WHATSAPP_APP_SECRET")
+    if unsafe:
+        raise RuntimeError(
+            "Configuration de production refusée. Valeurs à sécuriser : "
+            + ", ".join(unsafe)
+        )
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
+    _validate_production_settings()
     logger.info(
         "Démarrage %s (env=%s, whatsapp_mock=%s, backoffice_dist=%s exists=%s)",
         settings.app_name,
@@ -46,13 +69,43 @@ async def lifespan(_app: FastAPI):
         DIST_DIR,
         INDEX_HTML.is_file(),
     )
-    yield
+    stop_event = asyncio.Event()
+    task: asyncio.Task | None = None
+    if settings.autonomous_mode_enabled:
+        task = asyncio.create_task(_run_autonomous_scheduler(stop_event))
+    try:
+        yield
+    finally:
+        stop_event.set()
+        if task is not None:
+            await task
 
 
-app = FastAPI(title=settings.app_name, version="0.2.0", lifespan=lifespan)
+async def _run_autonomous_scheduler(stop_event: asyncio.Event) -> None:
+    logger.info(
+        "Orchestration autonome active (publication_auto=%s, intervalle=%ss)",
+        settings.autonomous_publish_enabled,
+        settings.autonomous_poll_seconds,
+    )
+    while not stop_event.is_set():
+        try:
+            async with AsyncSessionLocal() as session:
+                result = await AutonomousWorkflowService(session).run_once()
+                logger.info("Cycle autonome: %s", result["state"])
+        except Exception:  # noqa: BLE001
+            logger.exception("Le cycle autonome a échoué; nouvel essai au prochain passage")
+        try:
+            await asyncio.wait_for(
+                stop_event.wait(), timeout=settings.autonomous_poll_seconds
+            )
+        except TimeoutError:
+            pass
+
+
+app = FastAPI(title=settings.app_name, version="0.3.0", lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=settings.cors_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

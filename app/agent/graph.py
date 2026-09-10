@@ -22,6 +22,8 @@ async def build_agent(
     extra_context: str | None = None,
     *,
     model_name: str | None = None,
+    actor_role: str = "admin",
+    actor_teacher_id: int | None = None,
 ):
     if not settings.gemini_api_key:
         raise RuntimeError(
@@ -40,7 +42,11 @@ async def build_agent(
         temperature=0.2,
         max_retries=2,
     )
-    tools = build_planning_tools(session)
+    tools = build_planning_tools(
+        session,
+        actor_role=actor_role,
+        actor_teacher_id=actor_teacher_id,
+    )
     return create_react_agent(model=llm, tools=tools, prompt=prompt)
 
 

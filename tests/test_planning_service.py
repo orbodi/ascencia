@@ -86,6 +86,28 @@ async def test_impacted_entries_and_propose_apply(session):
     )
     assert proposal["ok"] is True
 
+    with pytest.raises(ValueError, match="approbation humaine"):
+        await svc.apply_schedule_change(proposal["change_id"])
+
+    approved = await svc.approve_schedule_change(
+        proposal["change_id"], approved_by="responsable-test"
+    )
+    assert approved["status"] == "approved"
+
     applied = await svc.apply_schedule_change(proposal["change_id"])
     assert applied["ok"] is True
     assert applied["entry"]["entry_date"] == choice["entry_date"]
+
+
+@pytest.mark.asyncio
+async def test_manual_entry_rejects_wrong_day(session):
+    data = await _seed_minimal(session)
+    svc = PlanningService(session)
+
+    wrong_day = await svc.validate_schedule_entry(
+        course_id=data["entry"].course_id,
+        room_id=data["room_b"].id,
+        timeslot_id=data["slot_thu"].id,
+        entry_date=date(2026, 8, 5),
+    )
+    assert wrong_day[0]["code"] == "timeslot_day_mismatch"

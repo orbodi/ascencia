@@ -6,7 +6,7 @@ import { Button, Input } from "../components/ui";
 export function LoginPage() {
   const { user, loading, login } = useAuth();
   const [username, setUsername] = useState("admin");
-  const [password, setPassword] = useState("admin123");
+  const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -27,38 +27,45 @@ export function LoginPage() {
 
   return (
     <div className="min-h-screen grid lg:grid-cols-2">
-      <section className="relative hidden lg:flex flex-col justify-between p-12 text-white overflow-hidden bg-[linear-gradient(145deg,#0c2220_0%,#143532_48%,#0d7a5f_140%)]">
+      <section className="relative hidden lg:flex flex-col justify-between p-12 text-white overflow-hidden bg-[linear-gradient(145deg,#14234f_0%,#294394_62%,#d84a08_180%)]">
         <div
           className="absolute inset-0 opacity-30"
           style={{
             backgroundImage:
-              "radial-gradient(circle at 20% 20%, rgba(213,239,230,0.25), transparent 40%), radial-gradient(circle at 80% 70%, rgba(13,122,95,0.45), transparent 45%)",
+              "radial-gradient(circle at 20% 20%, rgba(255,255,255,0.2), transparent 40%), radial-gradient(circle at 80% 70%, rgba(216,74,8,0.35), transparent 45%)",
           }}
         />
         <div className="relative animate-fade-up">
-          <div className="text-xs uppercase tracking-[0.2em] text-white/50 mb-6">
-            Université — emplois du temps
+          <img
+            src="/backoffice/logo-ak.png"
+            alt="Ascencia Keyce"
+            className="h-28 w-72 object-contain object-left mb-10 rounded-2xl bg-white/95 p-3"
+          />
+          <div className="text-xs uppercase tracking-[0.2em] text-white/60 mb-6">
+            Ascencia Keyce Togo — Lomé
           </div>
           <h1 className="font-[family-name:var(--font-display)] text-6xl leading-[0.95] tracking-tight max-w-md">
-            Ascencia
+            Planification intelligente
           </h1>
           <p className="mt-5 text-white/70 max-w-sm text-base leading-relaxed">
-            Pilotez plannings, absences et validations depuis un espace unique.
+            Collectez les disponibilités, arbitrez les contraintes et publiez un planning fiable depuis un espace unique.
           </p>
         </div>
         <div className="relative text-sm text-white/45 animate-fade-up stagger-2">
-          Assistant IA · Planning · Notifications
+          Assistant IA supervisé · Validation humaine · WhatsApp Business
         </div>
       </section>
 
       <section className="relative flex items-center justify-center p-6 sm:p-10 app-shell">
         <div className="relative z-10 w-full max-w-md animate-fade-up">
           <div className="lg:hidden mb-8">
-            <div className="font-[family-name:var(--font-display)] text-4xl text-ink">
-              Ascencia
-            </div>
+            <img
+              src="/backoffice/logo-ak.png"
+              alt="Ascencia Keyce"
+              className="h-20 w-48 object-contain object-left"
+            />
             <p className="text-ink-soft text-sm mt-2">
-              Connexion au back-office
+              Connexion au centre de pilotage
             </p>
           </div>
 

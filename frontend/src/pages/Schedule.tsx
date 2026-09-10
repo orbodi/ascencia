@@ -33,21 +33,25 @@ function fmt(d: Date): string {
 }
 
 const STATUS_COLOR: Record<string, string> = {
-  scheduled: "bg-accent-soft border-accent/30 text-accent",
+  scheduled: "bg-brand-blue-soft border-brand-blue/30 text-brand-blue",
   cancelled: "bg-red-50 border-red-200 text-red-700",
   confirmed: "bg-emerald-100 border-emerald-300 text-emerald-800",
-  rescheduled: "bg-amber-50 border-amber-200 text-amber-800",
+  moved: "bg-amber-50 border-amber-200 text-amber-800",
+};
+
+const STATUS_LABEL: Record<string, string> = {
+  scheduled: "Planifiée",
+  cancelled: "Annulée",
+  moved: "Déplacée",
 };
 
 export function SchedulePage() {
   const qc = useQueryClient();
-  const [weekStart, setWeekStart] = useState(() =>
-    mondayOf(new Date("2026-08-03"))
-  );
+  const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
   const [selected, setSelected] = useState<Entry | null>(null);
 
   const weekParam = fmt(weekStart);
-  const { data = [], isLoading } = useQuery({
+  const { data = [], isLoading, error, refetch } = useQuery({
     queryKey: ["schedule", weekParam],
     queryFn: () =>
       api<Entry[]>(`/admin/schedule?week_start=${weekParam}`),
@@ -82,9 +86,9 @@ export function SchedulePage() {
     <div>
       <PageHeader
         title="Planning semaine"
-        subtitle="Grille des séances (cliquer pour détail)"
+        subtitle={`Du ${days[0].toLocaleDateString("fr-FR", { day: "2-digit", month: "long" })} au ${days[4].toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" })}`}
         actions={
-          <div className="flex gap-2">
+          <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
             <Button
               variant="ghost"
               onClick={() => {
@@ -97,11 +101,12 @@ export function SchedulePage() {
             </Button>
             <Button
               variant="ghost"
-              onClick={() => setWeekStart(mondayOf(new Date("2026-08-03")))}
+              onClick={() => setWeekStart(mondayOf(new Date()))}
             >
-              Semaine démo
+              Aujourd’hui
             </Button>
             <Button
+              className="col-span-2 sm:col-span-1"
               variant="ghost"
               onClick={() => {
                 const d = new Date(weekStart);
@@ -114,15 +119,32 @@ export function SchedulePage() {
           </div>
         }
       />
+      {!isLoading && !error ? (
+        <div className="mb-4 flex flex-wrap items-center gap-2 text-xs">
+          <span className="rounded-lg bg-brand-blue-soft px-3 py-1.5 font-semibold text-brand-blue">{data.filter((entry) => entry.status === "scheduled").length} séance(s) planifiée(s)</span>
+          <span className="rounded-lg bg-red-50 px-3 py-1.5 font-semibold text-red-700">{data.filter((entry) => entry.status === "cancelled").length} annulée(s)</span>
+          <span className="text-ink-soft">Sélectionnez une séance pour consulter son détail.</span>
+        </div>
+      ) : null}
       {isLoading ? (
         <p className="text-ink-soft">Chargement…</p>
+      ) : error ? (
+        <Card className="p-5 border-warn/30">
+          <p className="font-semibold">Le planning n’a pas pu être chargé.</p>
+          <button
+            className="mt-2 min-h-11 text-sm font-semibold text-accent underline"
+            onClick={() => void refetch()}
+          >
+            Réessayer
+          </button>
+        </Card>
       ) : (
-        <div className="grid md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-5">
           {days.map((d) => {
             const key = fmt(d);
             const entries = byDate[key] || [];
             return (
-              <Card key={key} className="p-3 min-h-56">
+              <Card key={key} className="p-3 min-h-40 xl:min-h-56">
                 <div className="text-xs uppercase tracking-wide text-ink-soft mb-2">
                   {d.toLocaleDateString("fr-FR", {
                     weekday: "short",
@@ -138,7 +160,7 @@ export function SchedulePage() {
                       <button
                         key={e.id}
                         onClick={() => setSelected(e)}
-                        className={`w-full text-left rounded-xl border px-2.5 py-2 text-xs ${
+                        className={`w-full min-h-11 text-left rounded-xl border px-3 py-2.5 text-xs transition hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${
                           STATUS_COLOR[e.status] || STATUS_COLOR.scheduled
                         }`}
                       >
@@ -160,9 +182,20 @@ export function SchedulePage() {
       )}
 
       {selected ? (
-        <div className="fixed inset-0 bg-ink/40 grid place-items-center p-4 z-50">
-          <Card className="w-full max-w-md p-6">
-            <h3 className="text-xl font-[family-name:var(--font-display)] mb-3">
+        <div
+          className="fixed inset-0 bg-ink/55 grid place-items-center p-4 z-50"
+          role="presentation"
+          onMouseDown={() => setSelected(null)}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="schedule-detail-title"
+            className="w-full max-w-md"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+          <Card className="w-full p-5 sm:p-6">
+            <h3 id="schedule-detail-title" className="text-xl font-[family-name:var(--font-display)] mb-3">
               Séance #{selected.id}
             </h3>
             <dl className="text-sm space-y-2 mb-5">
@@ -192,7 +225,7 @@ export function SchedulePage() {
               </div>
               <div className="flex justify-between gap-4">
                 <dt className="text-ink-soft">Statut</dt>
-                <dd>{selected.status}</dd>
+                <dd>{STATUS_LABEL[selected.status] || selected.status}</dd>
               </div>
             </dl>
             <div className="flex gap-2 justify-end">
@@ -209,6 +242,7 @@ export function SchedulePage() {
               ) : null}
             </div>
           </Card>
+          </div>
         </div>
       ) : null}
     </div>

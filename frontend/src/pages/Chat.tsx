@@ -14,9 +14,16 @@ type HistoryResponse = {
 function welcomeMsg(agentName: string): Msg {
   return {
     role: "assistant",
-    content: `Bonjour, je suis **${agentName}**, votre assistant de gestion des emplois du temps.\n\nPosez une question — ex. : *Alice Martin absente le 2026-08-05*, ou *planning de la semaine*.`,
+    content: `Bonjour, je suis **${agentName}**, votre assistant supervisé de gestion des emplois du temps.\n\nJe peux expliquer l’état du système, afficher le planning de la semaine et accompagner le traitement d’une indisponibilité. Toute modification reste soumise à la validation humaine.`,
   };
 }
+
+const QUICK_ACTIONS = [
+  "Affiche le planning de la semaine",
+  "Donne-moi l’état du système",
+  "Combien de validations sont en attente ?",
+  "Que peux-tu faire ?",
+];
 
 export function ChatPage() {
   const { user } = useAuth();
@@ -71,9 +78,8 @@ export function ChatPage() {
     },
   });
 
-  async function send(e: FormEvent) {
-    e.preventDefault();
-    const text = input.trim();
+  async function deliver(rawText: string) {
+    const text = rawText.trim();
     if (!text || busy) return;
     setInput("");
     setMessages((m) => [...m, { role: "user", content: text }]);
@@ -105,11 +111,16 @@ export function ChatPage() {
     }
   }
 
+  async function send(e: FormEvent) {
+    e.preventDefault();
+    await deliver(input);
+  }
+
   return (
     <div className="h-[calc(100vh-8rem)] flex flex-col">
       <PageHeader
-        title={`Chat ${agentName}`}
-        subtitle="Historique conservé en base — survit au rechargement"
+        title={`Assistant ${agentName}`}
+        subtitle="Réponses fondées sur la base de données, avec validation humaine des actions"
         actions={
           <Button
             variant="ghost"
@@ -173,15 +184,38 @@ export function ChatPage() {
           ) : null}
           <div ref={bottomRef} />
         </div>
+        <div className="border-t border-line bg-white px-3 pt-3">
+          <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-ink-soft">Actions rapides</div>
+          <div className="flex gap-2 overflow-x-auto pb-2">
+            {QUICK_ACTIONS.map((action) => (
+              <button
+                key={action}
+                type="button"
+                disabled={busy}
+                onClick={() => void deliver(action)}
+                className="min-h-10 shrink-0 rounded-xl border border-brand-blue/20 bg-brand-blue-soft/70 px-3 text-xs font-semibold text-brand-blue transition hover:border-brand-blue/40 hover:bg-brand-blue-soft disabled:opacity-50"
+              >
+                {action}
+              </button>
+            ))}
+          </div>
+        </div>
         <form
           onSubmit={send}
-          className="border-t border-line p-3 flex gap-2 bg-white"
+          className="p-3 flex items-end gap-2 bg-white"
         >
-          <input
-            className="flex-1 rounded-xl border border-line px-3 py-2.5 outline-none focus:border-accent"
-            placeholder="Écrire un message…"
+          <textarea
+            rows={1}
+            className="min-h-11 max-h-32 flex-1 resize-y rounded-xl border border-line px-3 py-2.5 outline-none focus:border-accent focus:ring-2 focus:ring-accent/15"
+            placeholder="Écrivez une demande précise…"
             value={input}
             onChange={(e) => setInput(e.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.shiftKey) {
+                event.preventDefault();
+                void deliver(input);
+              }
+            }}
             disabled={busy}
           />
           <Button disabled={busy || !input.trim()}>
