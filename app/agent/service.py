@@ -68,8 +68,11 @@ class AgentService:
         channel: str = "api",
         teacher_id: int | None = None,
         actor_role: str = "admin",
+        whatsapp_to: str | None = None,
     ) -> dict:
-        extra = await self._build_context(teacher_id)
+        extra = await self._build_context(
+            teacher_id, channel=channel, whatsapp_to=whatsapp_to
+        )
         history = await self._load_history(channel, external_user_id, limit=12)
 
         await self._save_message(channel, external_user_id, "user", message)
@@ -95,6 +98,7 @@ class AgentService:
         reply: str | None = None
         used_model = preferred
         last_error: BaseException | None = None
+        deliver_to = whatsapp_to if channel == "whatsapp" else None
 
         for model_name in model_candidates(preferred):
             for attempt in range(1, 4):
@@ -105,6 +109,7 @@ class AgentService:
                         model_name=model_name,
                         actor_role=actor_role,
                         actor_teacher_id=teacher_id,
+                        whatsapp_to=deliver_to,
                     )
                     result = await agent.ainvoke({"messages": lc_messages})
                     reply = self._extract_reply(result["messages"])
@@ -152,14 +157,30 @@ class AgentService:
             "teacher_id": teacher_id,
         }
 
-    async def _build_context(self, teacher_id: int | None) -> str | None:
+    async def _build_context(
+        self,
+        teacher_id: int | None,
+        *,
+        channel: str = "api",
+        whatsapp_to: str | None = None,
+    ) -> str | None:
         today = date.today()
         monday = today - timedelta(days=today.weekday())
         sunday = monday + timedelta(days=6)
+        whatsapp_hint = ""
+        if channel == "whatsapp" and whatsapp_to:
+            whatsapp_hint = (
+                "Canal WhatsApp : pour un planning PDF, utilise par défaut "
+                "generate_parcours_schedule_pdf (UN seul fichier pour le parcours). "
+                "Identifie le parcours avec list_levels. N'envoie un PDF par enseignant "
+                "que si l'utilisateur le demande explicitement. "
+                "L'outil joint automatiquement le fichier — ne cite jamais /app/exports/. "
+            )
         if teacher_id is None:
             return (
                 "Canal administration authentifié. Identifie l'enseignant via "
                 "list_teachers si le nom n'est pas clair. "
+                f"{whatsapp_hint}"
                 f"Date du jour : {today.isoformat()}. Semaine courante : "
                 f"{monday.isoformat()} à {sunday.isoformat()}. "
                 "Les données peuvent être un jeu de démonstration : ne les présente "
@@ -171,6 +192,7 @@ class AgentService:
         return (
             f"Utilisateur courant = enseignant #{teacher.id} ({teacher.name}, "
             f"{teacher.email}). Priorise ses demandes. "
+            f"{whatsapp_hint}"
             f"Date du jour : {today.isoformat()}. Semaine courante : "
             f"{monday.isoformat()} à {sunday.isoformat()}."
         )

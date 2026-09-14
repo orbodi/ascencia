@@ -67,9 +67,13 @@ async def test_generate_teacher_and_group_pdf(session):
     assert teacher_pdf["ok"] is True
     assert Path(teacher_pdf["path"]).exists()
     assert Path(teacher_pdf["path"]).stat().st_size > 0
+    assert teacher_pdf["filename"].startswith("EDT_S")
+    assert teacher_pdf["filename"].endswith(".pdf")
 
     group_pdf = await exporter.generate_group_schedule_pdf(
         group.id, week_start=date(2026, 8, 3)
     )
     assert group_pdf["ok"] is True
     assert Path(group_pdf["path"]).exists()
+    assert group_pdf["filename"].startswith("EDT_S")
+    assert "SEMAINE" in group_pdf["filename"]

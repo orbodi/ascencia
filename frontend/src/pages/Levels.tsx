@@ -23,15 +23,16 @@ const empty = {
 export function LevelsPage() {
   const qc = useQueryClient();
   const [form, setForm] = useState(empty);
+  const [editingId, setEditingId] = useState<number | null>(null);
   const { data = [], isLoading } = useQuery({
     queryKey: ["levels"],
     queryFn: () => api<Level[]>("/admin/levels"),
   });
 
-  const create = useMutation({
+  const save = useMutation({
     mutationFn: () =>
-      api("/admin/levels", {
-        method: "POST",
+      api(editingId ? `/admin/levels/${editingId}` : "/admin/levels", {
+        method: editingId ? "PATCH" : "POST",
         body: JSON.stringify({
           ...form,
           speciality: form.speciality || null,
@@ -40,6 +41,7 @@ export function LevelsPage() {
       }),
     onSuccess: () => {
       setForm(empty);
+      setEditingId(null);
       void qc.invalidateQueries({ queryKey: ["levels"] });
     },
   });
@@ -47,12 +49,36 @@ export function LevelsPage() {
   const remove = useMutation({
     mutationFn: (id: number) =>
       api(`/admin/levels/${id}`, { method: "DELETE" }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["levels"] }),
+    onSuccess: (_data, id) => {
+      if (editingId === id) {
+        setEditingId(null);
+        setForm(empty);
+      }
+      void qc.invalidateQueries({ queryKey: ["levels"] });
+    },
   });
+
+  function resetForm() {
+    setEditingId(null);
+    setForm(empty);
+    save.reset();
+  }
+
+  function startEdit(l: Level) {
+    setEditingId(l.id);
+    setForm({
+      code: l.code,
+      label: l.label,
+      degree: l.degree,
+      year: l.year,
+      speciality: l.speciality || "",
+    });
+    save.reset();
+  }
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
-    create.mutate();
+    save.mutate();
   }
 
   return (
@@ -63,7 +89,9 @@ export function LevelsPage() {
       />
       <div className="grid lg:grid-cols-[340px_1fr] gap-6">
         <Card className="p-5 h-fit">
-          <h2 className="font-semibold mb-4">Nouveau parcours</h2>
+          <h2 className="font-semibold mb-4">
+            {editingId ? "Modifier le parcours" : "Nouveau parcours"}
+          </h2>
           <form className="space-y-3" onSubmit={onSubmit}>
             <Input
               label="Code"
@@ -105,9 +133,28 @@ export function LevelsPage() {
                 setForm({ ...form, speciality: e.target.value })
               }
             />
-            <Button className="w-full" disabled={create.isPending}>
-              Ajouter
+            {save.isError ? (
+              <p className="text-sm text-warn">
+                {(save.error as Error)?.message || "Enregistrement impossible"}
+              </p>
+            ) : null}
+            <Button className="w-full" disabled={save.isPending}>
+              {save.isPending
+                ? "Enregistrement…"
+                : editingId
+                  ? "Enregistrer"
+                  : "Ajouter"}
             </Button>
+            {editingId ? (
+              <Button
+                type="button"
+                variant="ghost"
+                className="w-full"
+                onClick={resetForm}
+              >
+                Annuler
+              </Button>
+            ) : null}
           </form>
         </Card>
         <Card className="overflow-hidden">
@@ -144,6 +191,9 @@ export function LevelsPage() {
                     <td className="px-4 py-3">{l.year}</td>
                     <td className="px-4 py-3">{l.speciality || "—"}</td>
                     <td className="px-4 py-3 text-right">
+                      <Button variant="ghost" onClick={() => startEdit(l)}>
+                        Modifier
+                      </Button>
                       <Button
                         variant="ghost"
                         onClick={() => remove.mutate(l.id)}

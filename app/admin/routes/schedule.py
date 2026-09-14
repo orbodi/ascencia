@@ -1,6 +1,7 @@
 from datetime import date, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import FileResponse
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -20,6 +21,7 @@ from app.domain.models import (
     ScheduleEntryStatus,
     TimeSlot,
 )
+from app.exporters import PdfExporter
 from app.services.planning_service import PlanningService
 
 router = APIRouter(tags=["admin-schedule"])
@@ -191,3 +193,78 @@ async def cancel_schedule_entry(
         "entry_date": entry.entry_date,
         "status": entry.status,
     }
+
+
+@router.get("/admin/schedule/export/pdf")
+async def export_week_pdf(
+    week_start: date | None = Query(default=None),
+    preview: bool = Query(default=False),
+    _user: AdminUser = Depends(require_admin_user),
+    session: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    try:
+        result = await PdfExporter(session).generate_week_schedule_pdf(
+            week_start=week_start,
+            preview=preview,
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erreur génération PDF: {exc}",
+        ) from exc
+    return FileResponse(
+        path=result["path"],
+        media_type=result.get("media_type", "application/pdf"),
+        filename=result["filename"],
+        content_disposition_type="inline" if preview else "attachment",
+    )
+
+
+@router.get("/admin/schedule/export/pdf/teacher/{teacher_id}")
+async def export_teacher_pdf_admin(
+    teacher_id: int,
+    week_start: date | None = Query(default=None),
+    _user: AdminUser = Depends(require_admin_user),
+    session: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    try:
+        result = await PdfExporter(session).generate_teacher_schedule_pdf(
+            teacher_id, week_start=week_start
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erreur génération PDF: {exc}",
+        ) from exc
+    return FileResponse(
+        path=result["path"],
+        media_type="application/pdf",
+        filename=result["filename"],
+    )
+
+
+@router.get("/admin/schedule/export/pdf/group/{group_id}")
+async def export_group_pdf_admin(
+    group_id: int,
+    week_start: date | None = Query(default=None),
+    _user: AdminUser = Depends(require_admin_user),
+    session: AsyncSession = Depends(get_db),
+) -> FileResponse:
+    try:
+        result = await PdfExporter(session).generate_group_schedule_pdf(
+            group_id, week_start=week_start
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Erreur génération PDF: {exc}",
+        ) from exc
+    return FileResponse(
+        path=result["path"],
+        media_type="application/pdf",
+        filename=result["filename"],
+    )

@@ -52,5 +52,26 @@ services:
     profiles:
       - dev
 
+  # Tunnel HTTPS public (webhook Meta WhatsApp) — optionnel
+  # 1. NGROK_AUTHTOKEN dans .env (https://dashboard.ngrok.com/get-started/your-authtoken)
+  # 2. docker compose --profile tunnel up -d
+  # 3. URL publique : http://localhost:4040  ou  docker compose logs ngrok
+  # 4. Callback Meta : https://<sous-domaine>.ngrok-free.app/webhook/whatsapp
+  ngrok:
+    image: ngrok/ngrok:latest
+    container_name: geminia-ngrok
+    command:
+      - "http"
+      - "http://app:8000"
+      - "--log=stdout"
+    environment:
+      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
+    ports:
+      - "4040:4040"
+    depends_on:
+      - app
+    profiles:
+      - tunnel
+
 volumes:
   geminia_pgdata:

@@ -103,6 +103,21 @@ async def ensure_admin_and_config(session) -> None:
             settings.availability_form_url,
             "Lien du formulaire de collecte des disponibilités",
         ),
+        (
+            "planning_collection_start_date",
+            "",
+            "Date de début de collecte WhatsApp (AAAA-MM-JJ)",
+        ),
+        (
+            "planning_publication_date",
+            "",
+            "Date d'envoi du planning aux administrateurs (AAAA-MM-JJ)",
+        ),
+        (
+            "planning_target_week_start",
+            "",
+            "Lundi de la semaine cible du planning (AAAA-MM-JJ)",
+        ),
     ]
     for key, value, description in defaults:
         existing = await session.scalar(

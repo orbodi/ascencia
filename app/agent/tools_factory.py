@@ -10,13 +10,22 @@ from typing import Any
 from langchain_core.tools import tool
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
-from app.domain.models import AuditLog, Course, Room, ScheduleChange, ScheduleEntry, Teacher
-from app.notifications import EmailClient
+from app.domain.models import (
+    AcademicLevel,
+    Course,
+    Room,
+    ScheduleChange,
+    ScheduleEntry,
+    StudentGroup,
+    Teacher,
+)
+from app.services.availability_outreach import AvailabilityOutreachService
 from app.services.autonomous_workflow import AutonomousWorkflowService
 from app.services.history_service import HistoryService
 from app.services.generation_service import ScheduleGenerationService
-from app.services.system_config import get_availability_form_url
+from app.services.planning_cycle import PlanningCycleService
 from app.tools import planning as planning_tools
 from app.whatsapp import WhatsAppClient
 
@@ -30,11 +39,40 @@ def build_planning_tools(
     *,
     actor_role: str = "admin",
     actor_teacher_id: int | None = None,
+    whatsapp_to: str | None = None,
 ) -> list[Callable[..., Any]]:
     def teacher_scope_error(requested_teacher_id: int) -> str | None:
         if actor_role == "teacher" and requested_teacher_id != actor_teacher_id:
             return _dump({"ok": False, "error": "Accès limité à votre propre fiche"})
         return None
+
+    async def deliver_pdf_if_whatsapp(result: dict[str, Any]) -> dict[str, Any]:
+        """Sur canal WhatsApp, joint le PDF généré au fil de discussion."""
+        if not whatsapp_to or not result.get("ok") or not result.get("path"):
+            return result
+        delivery = await WhatsAppClient().send_document(
+            whatsapp_to,
+            result["path"],
+            caption=(
+                f"Emploi du temps — "
+                f"{result.get('level_label') or result.get('teacher_name') or result.get('group_name') or 'planning'}"
+            ),
+            filename=result.get("filename"),
+        )
+        result = {**result, "whatsapp_delivery": delivery}
+        if delivery.get("ok"):
+            result["delivered_on_whatsapp"] = True
+            result["user_message"] = (
+                "Le fichier PDF a été envoyé en pièce jointe sur WhatsApp. "
+                "Ne renvoie pas le chemin serveur ; confirme simplement l'envoi."
+            )
+        else:
+            result["delivered_on_whatsapp"] = False
+            result["user_message"] = (
+                "Le PDF a été généré mais l'envoi WhatsApp a échoué : "
+                f"{delivery.get('error') or 'erreur inconnue'}."
+            )
+        return result
 
     async def change_scope_error(change_id: int) -> str | None:
         if actor_role != "teacher":
@@ -50,6 +88,59 @@ def build_planning_tools(
         if teacher_id != actor_teacher_id:
             return _dump({"ok": False, "error": "Accès limité à vos propres séances"})
         return None
+    @tool
+    async def list_levels() -> str:
+        """Liste les parcours / niveaux académiques (id, code, label, spécialité)."""
+        rows = (
+            await session.execute(select(AcademicLevel).order_by(AcademicLevel.id))
+        ).scalars().all()
+        return _dump(
+            {
+                "ok": True,
+                "levels": [
+                    {
+                        "id": level.id,
+                        "code": level.code,
+                        "label": level.label,
+                        "degree": level.degree,
+                        "year": level.year,
+                        "speciality": level.speciality,
+                    }
+                    for level in rows
+                ],
+            }
+        )
+
+    @tool
+    async def list_groups() -> str:
+        """Liste les groupes étudiants avec leur parcours (academic_level_id)."""
+        rows = (
+            await session.execute(
+                select(StudentGroup)
+                .options(selectinload(StudentGroup.academic_level))
+                .order_by(StudentGroup.id)
+            )
+        ).scalars().all()
+        return _dump(
+            {
+                "ok": True,
+                "groups": [
+                    {
+                        "id": group.id,
+                        "name": group.name,
+                        "academic_level_id": group.academic_level_id,
+                        "level_code": group.academic_level.code
+                        if group.academic_level
+                        else None,
+                        "level_label": group.academic_level.label
+                        if group.academic_level
+                        else None,
+                    }
+                    for group in rows
+                ],
+            }
+        )
+
     @tool
     async def list_teachers() -> str:
         """Liste les enseignants (id, nom, email, téléphone WhatsApp)."""
@@ -267,95 +358,121 @@ def build_planning_tools(
         )
 
     @tool
+    async def generate_parcours_schedule_pdf(
+        level_id: int | None = None,
+        level_code: str | None = None,
+        week_start: str | None = None,
+    ) -> str:
+        """Génère UN seul PDF d'emploi du temps pour un parcours (niveau académique).
+        Préférez cet outil par défaut quand on demande « le planning » / « l'EDT ».
+        Identifiez le parcours via list_levels (level_id ou level_code, ex. B3, L3-INFO).
+        Sur WhatsApp, le fichier est envoyé en pièce jointe.
+        """
+        if level_id is None and not (level_code or "").strip():
+            return _dump(
+                {
+                    "ok": False,
+                    "error": "Indiquez level_id ou level_code (utilisez list_levels).",
+                }
+            )
+        result = await planning_tools.generate_level_schedule_pdf(
+            session,
+            level_id=level_id,
+            level_code=level_code,
+            week_start=week_start,
+        )
+        return _dump(await deliver_pdf_if_whatsapp(result))
+
+    @tool
     async def generate_teacher_schedule_pdf(
         teacher_id: int, week_start: str | None = None
     ) -> str:
-        """Génère le PDF d'emploi du temps d'un enseignant (week_start optionnel AAAA-MM-JJ)."""
+        """Génère le PDF d'un enseignant uniquement si l'utilisateur le demande explicitement.
+        Pour un planning de parcours / promotion, utilisez generate_parcours_schedule_pdf.
+        """
         if error := teacher_scope_error(teacher_id):
             return error
-        return _dump(
-            await planning_tools.generate_teacher_schedule_pdf(
-                session, teacher_id, week_start
-            )
+        result = await planning_tools.generate_teacher_schedule_pdf(
+            session, teacher_id, week_start
         )
+        return _dump(await deliver_pdf_if_whatsapp(result))
 
     @tool
     async def generate_group_schedule_pdf(
         group_id: int, week_start: str | None = None
     ) -> str:
-        """Génère le PDF d'emploi du temps d'un groupe (week_start optionnel AAAA-MM-JJ)."""
-        return _dump(
-            await planning_tools.generate_group_schedule_pdf(
-                session, group_id, week_start
-            )
+        """Génère le PDF d'un groupe précis. Préférez generate_parcours_schedule_pdf
+        pour un parcours complet en un seul fichier.
+        """
+        result = await planning_tools.generate_group_schedule_pdf(
+            session, group_id, week_start
         )
+        return _dump(await deliver_pdf_if_whatsapp(result))
 
     @tool
     async def preview_availability_form_delivery(
-        teacher_id: int,
+        teacher_id: int | None = None,
         channel: str = "both",
     ) -> str:
-        """Prévisualise l'envoi du formulaire sans envoyer de message."""
-        if actor_role != "admin":
-            return _dump({"ok": False, "error": "Action réservée à l'administration"})
-        teacher = await session.get(Teacher, teacher_id)
-        form_url = await get_availability_form_url(session)
-        if teacher is None:
-            return _dump({"ok": False, "error": "Enseignant introuvable"})
-        return _dump({
-            "ok": bool(form_url),
-            "teacher_id": teacher.id,
-            "teacher_name": teacher.name,
-            "email": teacher.email,
-            "phone_whatsapp": teacher.phone_whatsapp,
-            "channel": channel,
-            "form_url": form_url,
-            "error": None if form_url else "Lien de formulaire non configuré",
-        })
-
-    @tool
-    async def send_availability_form(
-        teacher_id: int,
-        channel: str,
-        approved_by: str,
-    ) -> str:
-        """Envoie le formulaire après confirmation explicite d'un administrateur."""
+        """Prévisualise l'envoi du formulaire de disponibilités (1 prof ou tous).
+        teacher_id omis = tous les enseignants actifs.
+        """
         if actor_role != "admin":
             return _dump({"ok": False, "error": "Action réservée à l'administration"})
         if channel not in {"email", "whatsapp", "both"}:
             return _dump({"ok": False, "error": "Canal invalide"})
-        if not approved_by.strip():
-            return _dump({"ok": False, "error": "Validation administrateur requise"})
-        teacher = await session.get(Teacher, teacher_id)
-        form_url = await get_availability_form_url(session)
-        if teacher is None or not form_url:
-            return _dump({"ok": False, "error": "Enseignant ou formulaire non configuré"})
-
-        subject = "Ascencia Keyce — formulaire de disponibilités"
-        message = (
-            f"Bonjour {teacher.name},\n\n"
-            "Merci de renseigner vos indisponibilités pour la prochaine période "
-            f"via ce formulaire : {form_url}\n\n"
-            "L'administration validera les données avant génération du planning."
+        return _dump(
+            await AvailabilityOutreachService(session).preview(
+                teacher_id=teacher_id,
+                channel=channel,  # type: ignore[arg-type]
+            )
         )
-        deliveries: dict[str, Any] = {}
-        if channel in {"email", "both"}:
-            deliveries["email"] = await EmailClient().send(teacher.email, subject, message)
-        if channel in {"whatsapp", "both"}:
-            if not teacher.phone_whatsapp:
-                deliveries["whatsapp"] = {"ok": False, "error": "Numéro manquant"}
-            else:
-                deliveries["whatsapp"] = await WhatsAppClient().send_text(
-                    teacher.phone_whatsapp, message
+
+    @tool
+    async def send_availability_form(
+        channel: str,
+        approved_by: str,
+        teacher_id: int | None = None,
+    ) -> str:
+        """Envoie le formulaire de disponibilités après confirmation admin.
+        Sans teacher_id : campagne vers TOUS les enseignants actifs (recommandé
+        pour démarrer l'établissement du planning).
+        """
+        if actor_role != "admin":
+            return _dump({"ok": False, "error": "Action réservée à l'administration"})
+        try:
+            return _dump(
+                await AvailabilityOutreachService(session).send(
+                    channel=channel,  # type: ignore[arg-type]
+                    approved_by=approved_by,
+                    teacher_id=teacher_id,
                 )
-        session.add(AuditLog(action="availability_form_sent", payload={
-            "teacher_id": teacher.id,
-            "channel": channel,
-            "approved_by": approved_by,
-            "deliveries": deliveries,
-        }))
-        await session.commit()
-        return _dump({"ok": all(item.get("ok") for item in deliveries.values()), "deliveries": deliveries})
+            )
+        except ValueError as exc:
+            return _dump({"ok": False, "error": str(exc)})
+
+    @tool
+    async def send_availability_form_campaign(
+        channel: str,
+        approved_by: str,
+        teacher_ids: list[int] | None = None,
+    ) -> str:
+        """Campagne de collecte : envoie le formulaire à une liste d'enseignants
+        (ou à tous les actifs si teacher_ids est omis). À utiliser pour lancer
+        l'établissement du planning.
+        """
+        if actor_role != "admin":
+            return _dump({"ok": False, "error": "Action réservée à l'administration"})
+        try:
+            return _dump(
+                await AvailabilityOutreachService(session).send(
+                    channel=channel,  # type: ignore[arg-type]
+                    approved_by=approved_by,
+                    teacher_ids=teacher_ids,
+                )
+            )
+        except ValueError as exc:
+            return _dump({"ok": False, "error": str(exc)})
 
     @tool
     async def generate_schedule_draft(week_start: str, requested_by: str) -> str:
@@ -397,6 +514,30 @@ def build_planning_tools(
         })
 
     @tool
+    async def run_planning_cycle() -> str:
+        """Avance le cycle Dashboard : à la date de collecte, contacte les profs
+        via WhatsApp ; à la date de publication, génère le planning et l'envoie
+        aux administrateurs (WHATSAPP_ADMINS).
+        """
+        if actor_role != "admin":
+            return _dump({"ok": False, "error": "Action réservée à l'administration"})
+        try:
+            return _dump(
+                await PlanningCycleService(session).run_once(
+                    initiated_by="admin-agent"
+                )
+            )
+        except ValueError as exc:
+            return _dump({"ok": False, "error": str(exc)})
+
+    @tool
+    async def get_planning_cycle_status() -> str:
+        """Statut du cycle planning (dates collecte/publication, phase, envois)."""
+        if actor_role != "admin":
+            return _dump({"ok": False, "error": "Action réservée à l'administration"})
+        return _dump(await PlanningCycleService(session).status())
+
+    @tool
     async def run_autonomous_workflow(week_start: str | None = None) -> str:
         """Fait avancer le cycle autonome de collecte, génération et publication.
 
@@ -414,6 +555,8 @@ def build_planning_tools(
 
     admin_tools = [
         list_teachers,
+        list_levels,
+        list_groups,
         list_rooms,
         list_courses,
         list_schedule,
@@ -430,10 +573,14 @@ def build_planning_tools(
         confirm_presence,
         cancel_course,
         get_teacher_actions_history,
-        generate_teacher_schedule_pdf,
+        generate_parcours_schedule_pdf,
         generate_group_schedule_pdf,
+        generate_teacher_schedule_pdf,
         preview_availability_form_delivery,
         send_availability_form,
+        send_availability_form_campaign,
+        get_planning_cycle_status,
+        run_planning_cycle,
         generate_schedule_draft,
         list_schedule_publications,
         run_autonomous_workflow,

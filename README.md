@@ -76,15 +76,23 @@ WHATSAPP_ADMINS=[{"nom":"Admin","prenom":"Demo","numero":"33600000000","role":"a
 WHATSAPP_TEACHERS=[{"nom":"Martin","prenom":"Alice","numero":"33610000001","role":"teacher"}]
 ```
 
-2. Exposez l'API (ngrok) :
+2. Exposez l'API (ngrok) — au choix :
+
 ```powershell
+# A) CLI local
 ngrok http 8000
+
+# B) Docker Compose (token NGROK_AUTHTOKEN dans .env)
+docker compose --profile tunnel up -d
+# Inspecter l'URL HTTPS : http://localhost:4040  ou  docker compose logs -f ngrok
 ```
 
 3. Meta Developer → WhatsApp → Configuration → Webhook :
 - Callback URL : `https://<ngrok>/webhook/whatsapp`
 - Verify token : `geminia-verify`
 - Abonnements : `messages`
+
+Pensez à aligner `PUBLIC_BASE_URL` sur l’URL HTTPS ngrok.
 
 4. Associez les numéros dans `WHATSAPP_ADMINS` / `WHATSAPP_TEACHERS`  
    (pour un prof, `prenom`+`nom` doit correspondre au seed, ex. `Alice Martin`).

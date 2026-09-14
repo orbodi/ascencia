@@ -6,49 +6,48 @@
   <style>
     @page { size: A4 landscape; margin: 10mm 12mm 12mm; }
     body { font-family: "Times New Roman", DejaVu Serif, serif; color: #111; font-size: 9.5pt; margin: 0; }
-    header { text-align: center; margin-bottom: 7mm; }
-    .logo { width: 47mm; height: 22mm; object-fit: contain; margin-bottom: 1mm; }
+    header { text-align: center; margin-bottom: 5mm; }
+    .logo { width: 78mm; height: 36mm; object-fit: contain; margin-bottom: 2mm; }
     h1 { margin: 0; color: #29469b; font-size: 21pt; line-height: 1; letter-spacing: .2px; }
     .week { margin: 2mm 0 0; color: #ef5713; font-weight: 700; font-size: 14pt; }
     .audience { margin: 1mm 0 0; font-weight: 700; font-size: 12pt; text-transform: uppercase; }
-    .semester { margin-top: 1mm; color: #3c465d; font-size: 9pt; }
     table { width: 100%; border-collapse: collapse; table-layout: fixed; }
     th, td { border: 1.5px solid #171717; text-align: center; vertical-align: middle; }
     th { padding: 2.2mm 1mm; background: #fff; font-weight: 700; font-size: 10pt; }
     th.time-column { width: 25mm; }
-    th .date { display: block; margin-top: .8mm; font-size: 8.5pt; }
+    th .date { display: block; margin-top: .8mm; font-size: 8.5pt; font-weight: 600; }
     td.time { width: 25mm; padding: 2mm 1mm; font-weight: 700; background: #fff; }
     td.time .duration { display: block; margin-top: 2mm; font-size: 8pt; }
     td.slot { height: 25mm; padding: 1.5mm 1mm; background: #fff; }
     td.empty { background: #bbb9ba; }
     td.complete { background: #e3efd9; }
-    .course { font-size: 9.7pt; line-height: 1.2; }
-    .room { margin-top: 1mm; font-size: 8pt; color: #3c465d; }
+    .course { font-size: 9.7pt; line-height: 1.2; font-weight: 700; }
     .progress { margin-top: 2mm; font-size: 8.5pt; }
+    .fin { margin-top: 1.5mm; font-size: 10pt; font-weight: 700; letter-spacing: .4px; }
     .teacher { border-top: 1px solid #555; margin: 1mm -1mm -1.5mm; padding-top: .8mm; font-size: 8.5pt; }
     tr.pause-row td { height: 5mm; padding: 0; }
     td.pause { background: #dce4f2; font-weight: 700; letter-spacing: .5px; }
     .empty-message { padding: 12mm; border: 1.5px dashed #75809a; text-align: center; color: #59637a; }
     footer { margin-top: 8mm; display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 10mm; }
-    .notice { text-align: center; font-style: italic; font-size: 9pt; line-height: 1.35; }
+    .notice { text-align: left; font-style: italic; font-size: 9pt; line-height: 1.35; max-width: 130mm; }
     .signature { min-width: 45mm; text-align: center; line-height: 1.5; }
-    .generated { margin-top: 2mm; color: #687086; font-size: 7.5pt; }
+    .signature .role { font-weight: 700; }
+    .signature .name { margin-top: 1mm; }
   </style>
 </head>
 <body>
   <header>
     <img class="logo" src="logo-ak.png" alt="Ascencia Keyce" />
-    <h1>EMPLOI DU TEMPS</h1>
-    <p class="week">Semaine du {{ week_label }}</p>
-    <p class="audience">{{ audience_label }} — {{ audience_name }}</p>
-    <div class="semester">{{ semester_label }}</div>
+    <h1>EMPLOI DE TEMPS</h1>
+    <p class="week">Semaine {{ week_label }}</p>
+    <p class="audience">{{ audience_name }}</p>
   </header>
 
   {% if rows %}
   <table>
     <thead>
       <tr>
-        <th class="time-column">Plage horaire</th>
+        <th class="time-column">Plage Horaire</th>
         {% for day in days %}
         <th>{{ day.name }}<span class="date">{{ day.date_label }}</span></th>
         {% endfor %}
@@ -68,8 +67,8 @@
           <td class="slot {% if not cell %}empty{% elif cell[0].is_complete %}complete{% endif %}">
             {% for entry in cell %}
             <div class="course">{{ entry.course_title }}</div>
-            <div class="room">{{ entry.room_name }}</div>
             <div class="progress">{{ entry.session_progress }}</div>
+            {% if entry.is_complete %}<div class="fin">FIN</div>{% endif %}
             <div class="teacher">{{ entry.teacher_name }}</div>
             {% if not loop.last %}<hr />{% endif %}
             {% endfor %}
@@ -86,10 +85,13 @@
 
   <footer>
     <div class="notice">
-      <strong>NB :</strong> Cet emploi du temps est susceptible d'évoluer selon les disponibilités des intervenants.
-      <div class="generated">Document généré automatiquement le {{ generated_at }} — {{ entries_count }} séance(s).</div>
+      <strong>NB :</strong> *Cet emploi du temps est susceptible d'évoluer,
+      dépendamment de la disponibilité des différents intervenants.
     </div>
-    <div class="signature">La Direction académique</div>
+    <div class="signature">
+      <div class="role">La Direction</div>
+      <div class="name">{{ director_name }}</div>
+    </div>
   </footer>
 </body>
 </html>

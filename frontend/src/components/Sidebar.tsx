@@ -12,8 +12,6 @@ const sections = [
     links: [
       { to: "/", label: "Tableau de bord", icon: "dashboard" },
       { to: "/schedule", label: "Planning", icon: "calendar" },
-      { to: "/publications", label: "Génération & publication", icon: "check" },
-      { to: "/changes", label: "Validations", icon: "check" },
       { to: "/chat", label: "Assistant IA", icon: "chat" },
     ],
   },
@@ -30,7 +28,6 @@ const sections = [
   {
     title: "Administration",
     links: [
-      { to: "/history", label: "Traçabilité", icon: "history" },
       { to: "/config", label: "Configuration IA", icon: "settings" },
     ],
   },

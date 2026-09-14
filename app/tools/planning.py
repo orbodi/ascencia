@@ -217,3 +217,23 @@ async def generate_group_schedule_pdf(
         return {"ok": False, "error": str(exc)}
     except Exception as exc:  # noqa: BLE001
         return {"ok": False, "error": f"Erreur PDF: {exc}"}
+
+
+async def generate_level_schedule_pdf(
+    session: AsyncSession,
+    level_id: int | None = None,
+    level_code: str | None = None,
+    week_start: str | None = None,
+) -> dict:
+    from app.exporters import PdfExporter
+
+    try:
+        return await PdfExporter(session).generate_level_schedule_pdf(
+            level_id=level_id,
+            level_code=level_code,
+            week_start=date.fromisoformat(week_start) if week_start else None,
+        )
+    except ValueError as exc:
+        return {"ok": False, "error": str(exc)}
+    except Exception as exc:  # noqa: BLE001
+        return {"ok": False, "error": f"Erreur PDF: {exc}"}

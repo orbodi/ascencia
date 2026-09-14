@@ -226,6 +226,7 @@ class WhatsAppWebhookService:
             channel="whatsapp",
             teacher_id=teacher_id,
             actor_role=role,
+            whatsapp_to=wa_from,
         )
         reply = agent_result["reply"]
         if len(reply) > 3900:
@@ -255,9 +256,10 @@ class WhatsAppWebhookService:
         for teacher in result.scalars().all():
             if teacher.name.casefold() == full:
                 # Aligne le téléphone seed avec le .env
-                if normalize_phone(teacher.phone_whatsapp) != person.phone_norm:
+                phone_norm = normalize_phone(person.numero)
+                if normalize_phone(teacher.phone_whatsapp) != phone_norm:
                     teacher.phone_whatsapp = (
-                        f"+{person.phone_norm}"
+                        f"+{phone_norm}"
                         if not person.numero.startswith("+")
                         else person.numero
                     )

@@ -1,3 +1,4 @@
+from datetime import date
 from functools import lru_cache
 
 from pydantic import BaseModel, Field
@@ -13,6 +14,10 @@ class WhatsAppPerson(BaseModel):
     @property
     def full_name(self) -> str:
         return f"{self.prenom} {self.nom}".strip()
+
+    @property
+    def phone_norm(self) -> str:
+        return "".join(ch for ch in self.numero if ch.isdigit())
 
 
 class Settings(BaseSettings):
@@ -73,6 +78,10 @@ class Settings(BaseSettings):
 
     university_name: str = "Ascencia Keyce Togo"
     semester_label: str = "Semestre 1 — 2026"
+    semester_number: int = 1
+    # Lundi de la semaine 1 du semestre (pour EDT_S*_SEMAINE{n}_*.pdf).
+    semester_start_date: date | None = None
+    pdf_director_name: str = "Franck ASSOU"
     reminder_days_ahead: int = 3
 
     jwt_secret: str = "change-me-jwt-secret-geminia"

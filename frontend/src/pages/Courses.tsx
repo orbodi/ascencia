@@ -1,10 +1,13 @@
+import { FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { Button, Card, PageHeader } from "../components/ui";
+import { Button, Card, Input, PageHeader, Select } from "../components/ui";
 
 type Course = {
   id: number;
   title: string;
+  teacher_id: number;
+  group_id: number;
   teacher_name?: string;
   group_name?: string;
   planned_minutes: number;
@@ -18,6 +21,20 @@ type Course = {
   prerequisite_course_id: number | null;
 };
 
+type Teacher = { id: number; name: string; is_active: boolean };
+type Group = { id: number; name: string };
+
+const empty = {
+  title: "",
+  teacher_id: "",
+  group_id: "",
+  duration_minutes: 120,
+  planned_minutes: 720,
+  semester: 1,
+  priority: 0,
+  prerequisite_course_id: "",
+};
+
 function progressPct(c: Course): number {
   const done = (c.scheduled_sessions || 0) * c.duration_minutes;
   if (!c.planned_minutes) return 0;
@@ -26,9 +43,47 @@ function progressPct(c: Course): number {
 
 export function CoursesPage() {
   const qc = useQueryClient();
+  const [open, setOpen] = useState(false);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [form, setForm] = useState(empty);
   const { data = [], isLoading } = useQuery({
     queryKey: ["courses"],
     queryFn: () => api<Course[]>("/admin/courses"),
+  });
+  const { data: teachers = [] } = useQuery({
+    queryKey: ["teachers"],
+    queryFn: () => api<Teacher[]>("/admin/teachers"),
+    enabled: open,
+  });
+  const { data: groups = [] } = useQuery({
+    queryKey: ["groups"],
+    queryFn: () => api<Group[]>("/admin/groups"),
+    enabled: open,
+  });
+
+  const save = useMutation({
+    mutationFn: () =>
+      api(editingId ? `/admin/courses/${editingId}` : "/admin/courses", {
+        method: editingId ? "PATCH" : "POST",
+        body: JSON.stringify({
+          title: form.title.trim(),
+          teacher_id: Number(form.teacher_id),
+          group_id: Number(form.group_id),
+          duration_minutes: Number(form.duration_minutes),
+          planned_minutes: Number(form.planned_minutes),
+          semester: Number(form.semester),
+          priority: Number(form.priority),
+          prerequisite_course_id: form.prerequisite_course_id
+            ? Number(form.prerequisite_course_id)
+            : null,
+        }),
+      }),
+    onSuccess: () => {
+      setForm(empty);
+      setEditingId(null);
+      setOpen(false);
+      void qc.invalidateQueries({ queryKey: ["courses"] });
+    },
   });
 
   const remove = useMutation({
@@ -37,12 +92,63 @@ export function CoursesPage() {
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["courses"] }),
   });
 
+  function closeModal() {
+    setOpen(false);
+    setEditingId(null);
+    setForm(empty);
+    save.reset();
+  }
+
+  function openCreate() {
+    setEditingId(null);
+    setForm(empty);
+    save.reset();
+    setOpen(true);
+  }
+
+  function openEdit(c: Course) {
+    setEditingId(c.id);
+    setForm({
+      title: c.title,
+      teacher_id: String(c.teacher_id),
+      group_id: String(c.group_id),
+      duration_minutes: c.duration_minutes,
+      planned_minutes: c.planned_minutes,
+      semester: c.semester,
+      priority: c.priority,
+      prerequisite_course_id: c.prerequisite_course_id
+        ? String(c.prerequisite_course_id)
+        : "",
+    });
+    save.reset();
+    setOpen(true);
+  }
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    save.mutate();
+  }
+
+  const activeTeachers = teachers.filter((t) => t.is_active !== false);
+  const teacherOptions =
+    editingId != null
+      ? teachers.filter(
+          (t) =>
+            t.is_active !== false || String(t.id) === form.teacher_id
+        )
+      : activeTeachers;
+
   return (
     <div>
       <PageHeader
         title="Suivi des cours"
         subtitle="Heures faites / prévues par matière"
       />
+
+      <div className="mb-3 flex justify-end">
+        <Button onClick={openCreate}>Ajouter</Button>
+      </div>
+
       <Card className="overflow-hidden">
         <table className="w-full text-sm">
           <thead className="bg-mist text-left">
@@ -65,6 +171,12 @@ export function CoursesPage() {
                   Chargement…
                 </td>
               </tr>
+            ) : data.length === 0 ? (
+              <tr>
+                <td colSpan={9} className="px-4 py-4 text-ink-soft">
+                  Aucun cours. Cliquez sur Ajouter pour en créer un.
+                </td>
+              </tr>
             ) : (
               data.map((c) => {
                 const pct = progressPct(c);
@@ -73,7 +185,12 @@ export function CoursesPage() {
                     <td className="px-4 py-3 font-medium">{c.title}</td>
                     <td className="px-4 py-3">{c.teacher_name}</td>
                     <td className="px-4 py-3">{c.group_name}</td>
-                    <td className="px-4 py-3 text-xs text-ink-soft">S{c.semester} · priorité {c.priority}{c.prerequisite_course_id ? ` · prérequis #${c.prerequisite_course_id}` : ""}</td>
+                    <td className="px-4 py-3 text-xs text-ink-soft">
+                      S{c.semester} · priorité {c.priority}
+                      {c.prerequisite_course_id
+                        ? ` · prérequis #${c.prerequisite_course_id}`
+                        : ""}
+                    </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <div className="h-2 w-28 rounded-full bg-mist overflow-hidden">
@@ -89,12 +206,17 @@ export function CoursesPage() {
                     <td className="px-4 py-3">{c.hours_done}</td>
                     <td className="px-4 py-3">{c.hours_remaining}</td>
                     <td className="px-4 py-3 text-right">
-                      <Button
-                        variant="ghost"
-                        onClick={() => remove.mutate(c.id)}
-                      >
-                        Supprimer
-                      </Button>
+                      <div className="flex flex-wrap justify-end gap-2">
+                        <Button variant="ghost" onClick={() => openEdit(c)}>
+                          Modifier
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          onClick={() => remove.mutate(c.id)}
+                        >
+                          Supprimer
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -103,6 +225,159 @@ export function CoursesPage() {
           </tbody>
         </table>
       </Card>
+
+      {open ? (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-ink/55 p-4"
+          role="presentation"
+          onMouseDown={closeModal}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="course-form-title"
+            className="w-full max-w-lg"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <Card className="w-full p-5 sm:p-6">
+              <h3
+                id="course-form-title"
+                className="mb-4 text-xl font-[family-name:var(--font-display)]"
+              >
+                {editingId ? "Modifier le cours" : "Nouveau cours"}
+              </h3>
+              <form className="space-y-3" onSubmit={onSubmit}>
+                <Input
+                  label="Intitulé"
+                  value={form.title}
+                  onChange={(e) => setForm({ ...form, title: e.target.value })}
+                  required
+                  autoFocus
+                />
+                <Select
+                  label="Enseignant"
+                  value={form.teacher_id}
+                  onChange={(e) =>
+                    setForm({ ...form, teacher_id: e.target.value })
+                  }
+                  required
+                >
+                  <option value="">Choisir…</option>
+                  {teacherOptions.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.name}
+                      {t.is_active === false ? " (archivé)" : ""}
+                    </option>
+                  ))}
+                </Select>
+                <Select
+                  label="Groupe"
+                  value={form.group_id}
+                  onChange={(e) =>
+                    setForm({ ...form, group_id: e.target.value })
+                  }
+                  required
+                >
+                  <option value="">Choisir…</option>
+                  {groups.map((g) => (
+                    <option key={g.id} value={g.id}>
+                      {g.name}
+                    </option>
+                  ))}
+                </Select>
+                <div className="grid grid-cols-2 gap-3">
+                  <Input
+                    label="Durée séance (min)"
+                    type="number"
+                    min={15}
+                    max={720}
+                    value={form.duration_minutes}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        duration_minutes: Number(e.target.value),
+                      })
+                    }
+                    required
+                  />
+                  <Input
+                    label="Volume prévu (min)"
+                    type="number"
+                    min={15}
+                    value={form.planned_minutes}
+                    onChange={(e) =>
+                      setForm({
+                        ...form,
+                        planned_minutes: Number(e.target.value),
+                      })
+                    }
+                    required
+                  />
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <Select
+                    label="Semestre"
+                    value={form.semester}
+                    onChange={(e) =>
+                      setForm({ ...form, semester: Number(e.target.value) })
+                    }
+                  >
+                    <option value={1}>S1</option>
+                    <option value={2}>S2</option>
+                  </Select>
+                  <Input
+                    label="Priorité"
+                    type="number"
+                    min={0}
+                    max={100}
+                    value={form.priority}
+                    onChange={(e) =>
+                      setForm({ ...form, priority: Number(e.target.value) })
+                    }
+                  />
+                </div>
+                <Select
+                  label="Prérequis (optionnel)"
+                  value={form.prerequisite_course_id}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      prerequisite_course_id: e.target.value,
+                    })
+                  }
+                >
+                  <option value="">Aucun</option>
+                  {data
+                    .filter((c) => c.id !== editingId)
+                    .map((c) => (
+                      <option key={c.id} value={c.id}>
+                        #{c.id} — {c.title}
+                      </option>
+                    ))}
+                </Select>
+                {save.isError ? (
+                  <p className="text-sm text-warn">
+                    {(save.error as Error)?.message ||
+                      "Enregistrement impossible"}
+                  </p>
+                ) : null}
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button type="button" variant="ghost" onClick={closeModal}>
+                    Annuler
+                  </Button>
+                  <Button type="submit" disabled={save.isPending}>
+                    {save.isPending
+                      ? "Enregistrement…"
+                      : editingId
+                        ? "Enregistrer"
+                        : "Ajouter"}
+                  </Button>
+                </div>
+              </form>
+            </Card>
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

@@ -11,6 +11,8 @@ from app.admin.routes import (
     groups,
     history_admin,
     levels,
+    outreach,
+    planning_cycle,
     publications,
     presence_campaigns,
     rooms,
@@ -25,6 +27,8 @@ admin_router.include_router(dashboard.router)
 admin_router.include_router(levels.router)
 admin_router.include_router(publications.router)
 admin_router.include_router(presence_campaigns.router)
+admin_router.include_router(outreach.router)
+admin_router.include_router(planning_cycle.router)
 admin_router.include_router(teachers.router)
 admin_router.include_router(groups.router)
 admin_router.include_router(history_admin.router)
