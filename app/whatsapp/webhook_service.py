@@ -19,6 +19,7 @@ from app.services.system_config import get_agent_name
 from app.services.presence_service import PresenceCampaignService
 from app.whatsapp.client import WhatsAppClient, normalize_phone
 from app.whatsapp.contacts import WhatsAppPerson, find_person_by_phone
+from app.whatsapp.formatting import markdown_to_whatsapp
 
 logger = logging.getLogger(__name__)
 
@@ -232,7 +233,14 @@ class WhatsAppWebhookService:
         if len(reply) > 3900:
             reply = reply[:3900] + "…"
 
-        delivery = await self.whatsapp.send_text(wa_from, reply)
+        # Le prompt agent produit du Markdown (**gras**/*italique*) pensé
+        # pour le rendu riche du chat back-office ; WhatsApp a sa propre
+        # syntaxe (*gras*/_italique_), d'où la conversion juste avant
+        # l'envoi. `reply` (stocké/retourné ci-dessous) garde le Markdown
+        # d'origine, seul le texte envoyé sur WhatsApp est converti.
+        delivery = await self.whatsapp.send_text(
+            wa_from, markdown_to_whatsapp(reply)
+        )
         return {
             "from": wa_from,
             "recognized": True,
