@@ -1,4 +1,4 @@
-import { FormEvent, useState } from "react";
+import { FormEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import { Button, Card, Input, PageHeader, Select } from "../components/ui";
@@ -54,6 +54,7 @@ export function CoursesPage() {
   const [open, setOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState(empty);
+  const [localError, setLocalError] = useState<string | null>(null);
   const { data = [], isLoading } = useQuery({
     queryKey: ["courses"],
     queryFn: () => api<Course[]>("/admin/courses"),
@@ -87,9 +88,7 @@ export function CoursesPage() {
         }),
       }),
     onSuccess: () => {
-      setForm(empty);
-      setEditingId(null);
-      setOpen(false);
+      closeModal();
       void qc.invalidateQueries({ queryKey: ["courses"] });
     },
   });
@@ -104,12 +103,14 @@ export function CoursesPage() {
     setOpen(false);
     setEditingId(null);
     setForm(empty);
+    setLocalError(null);
     save.reset();
   }
 
   function openCreate() {
     setEditingId(null);
     setForm(empty);
+    setLocalError(null);
     save.reset();
     setOpen(true);
   }
@@ -128,12 +129,32 @@ export function CoursesPage() {
         ? String(c.prerequisite_course_id)
         : "",
     });
+    setLocalError(null);
     save.reset();
     setOpen(true);
   }
 
   function onSubmit(e: FormEvent) {
     e.preventDefault();
+    setLocalError(null);
+    if (!form.title.trim()) {
+      setLocalError("L'intitulé est obligatoire");
+      return;
+    }
+    if (!form.teacher_id || !form.group_id) {
+      setLocalError("Choisissez un enseignant et un groupe");
+      return;
+    }
+    if (form.planned_hours < form.duration_hours) {
+      setLocalError(
+        "Le volume prévu doit être au moins égal à la durée d'une séance"
+      );
+      return;
+    }
+    if (form.duration_hours <= 0 || form.planned_hours <= 0) {
+      setLocalError("Les durées doivent être positives");
+      return;
+    }
     save.mutate();
   }
 
@@ -141,21 +162,24 @@ export function CoursesPage() {
   const teacherOptions =
     editingId != null
       ? teachers.filter(
-          (t) =>
-            t.is_active !== false || String(t.id) === form.teacher_id
+          (t) => t.is_active !== false || String(t.id) === form.teacher_id
         )
       : activeTeachers;
+
+  const sessionsEstimate = useMemo(() => {
+    if (!form.duration_hours) return 0;
+    return Math.floor(form.planned_hours / form.duration_hours);
+  }, [form.duration_hours, form.planned_hours]);
+
+  const canCreate = activeTeachers.length > 0 && groups.length > 0;
 
   return (
     <div>
       <PageHeader
         title="Suivi des cours"
         subtitle="Heures faites / prévues par matière"
+        actions={<Button onClick={openCreate}>Ajouter</Button>}
       />
-
-      <div className="mb-3 flex justify-end">
-        <Button onClick={openCreate}>Ajouter</Button>
-      </div>
 
       <Card className="overflow-hidden">
         <table className="w-full text-sm">
@@ -201,7 +225,7 @@ export function CoursesPage() {
                     </td>
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
-                        <div className="h-2 w-28 rounded-full bg-mist overflow-hidden">
+                        <div className="h-2 w-28 overflow-hidden rounded-full bg-mist">
                           <div
                             className="h-full bg-accent"
                             style={{ width: `${pct}%` }}
@@ -220,7 +244,15 @@ export function CoursesPage() {
                         </Button>
                         <Button
                           variant="ghost"
-                          onClick={() => remove.mutate(c.id)}
+                          onClick={() => {
+                            if (
+                              window.confirm(
+                                `Supprimer le cours « ${c.title} » ?`
+                              )
+                            ) {
+                              remove.mutate(c.id);
+                            }
+                          }}
                         >
                           Supprimer
                         </Button>
@@ -254,6 +286,13 @@ export function CoursesPage() {
               >
                 {editingId ? "Modifier le cours" : "Nouveau cours"}
               </h3>
+              {!canCreate && !editingId ? (
+                <p className="mb-3 text-sm text-warn">
+                  {activeTeachers.length === 0
+                    ? "Ajoutez d'abord un enseignant actif."
+                    : "Ajoutez d'abord un groupe."}
+                </p>
+              ) : null}
               <form className="space-y-3" onSubmit={onSubmit}>
                 <Input
                   label="Intitulé"
@@ -261,6 +300,7 @@ export function CoursesPage() {
                   onChange={(e) => setForm({ ...form, title: e.target.value })}
                   required
                   autoFocus
+                  placeholder="Algorithmique"
                 />
                 <Select
                   label="Enseignant"
@@ -324,6 +364,10 @@ export function CoursesPage() {
                     required
                   />
                 </div>
+                <p className="text-xs text-ink-soft -mt-1">
+                  Environ {sessionsEstimate} séance
+                  {sessionsEstimate > 1 ? "s" : ""} sur le semestre.
+                </p>
                 <div className="grid grid-cols-2 gap-3">
                   <Select
                     label="Semestre"
@@ -361,13 +405,15 @@ export function CoursesPage() {
                     .filter((c) => c.id !== editingId)
                     .map((c) => (
                       <option key={c.id} value={c.id}>
-                        #{c.id} — {c.title}
+                        {c.title}
+                        {c.group_name ? ` — ${c.group_name}` : ""}
                       </option>
                     ))}
                 </Select>
-                {save.isError ? (
+                {localError || save.isError ? (
                   <p className="text-sm text-warn">
-                    {(save.error as Error)?.message ||
+                    {localError ||
+                      (save.error as Error)?.message ||
                       "Enregistrement impossible"}
                   </p>
                 ) : null}
@@ -375,7 +421,12 @@ export function CoursesPage() {
                   <Button type="button" variant="ghost" onClick={closeModal}>
                     Annuler
                   </Button>
-                  <Button type="submit" disabled={save.isPending}>
+                  <Button
+                    type="submit"
+                    disabled={
+                      save.isPending || (!editingId && !canCreate)
+                    }
+                  >
                     {save.isPending
                       ? "Enregistrement…"
                       : editingId

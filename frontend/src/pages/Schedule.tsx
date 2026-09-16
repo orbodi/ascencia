@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { api, getToken } from "../lib/api";
-import { Button, Card, PageHeader } from "../components/ui";
+import { ApiError, api, getToken } from "../lib/api";
+import { Button, Card, Input, PageHeader, Select } from "../components/ui";
 
 type Entry = {
   id: number;
@@ -17,10 +17,27 @@ type Entry = {
   timeslot_label?: string;
 };
 
+type Course = { id: number; title: string; group_name?: string };
+type Room = { id: number; name: string; capacity: number };
+type TimeSlot = {
+  id: number;
+  day_of_week: number;
+  start_time: string;
+  end_time: string;
+  label: string;
+};
+
 type PdfFetchResult = {
   blob: Blob;
   filename: string;
   mediaType: string;
+};
+
+const entryEmpty = {
+  course_id: "",
+  room_id: "",
+  timeslot_id: "",
+  entry_date: "",
 };
 
 function mondayOf(d: Date): Date {
@@ -36,6 +53,11 @@ function fmt(d: Date): string {
   const m = String(d.getMonth() + 1).padStart(2, "0");
   const day = String(d.getDate()).padStart(2, "0");
   return `${y}-${m}-${day}`;
+}
+
+function dayOfWeekMondayBased(isoDate: string): number {
+  const d = new Date(`${isoDate}T12:00:00`);
+  return (d.getDay() + 6) % 7;
 }
 
 const STATUS_COLOR: Record<string, string> = {
@@ -60,6 +82,27 @@ function filenameFromDisposition(
   if (utf?.[1]) return decodeURIComponent(utf[1].trim());
   const plain = /filename="?([^";]+)"?/i.exec(header);
   return plain?.[1]?.trim() || fallback;
+}
+
+function formatApiError(err: unknown): string {
+  if (err instanceof ApiError) {
+    try {
+      const parsed = JSON.parse(err.message);
+      if (parsed?.conflicts && Array.isArray(parsed.conflicts)) {
+        return parsed.conflicts
+          .map((c: { message?: string }) => c.message || "Conflit")
+          .join(" · ");
+      }
+    } catch {
+      /* plain string detail */
+    }
+    if (err.message.includes("[object Object]")) {
+      return "Conflit de planning détecté";
+    }
+    return err.message;
+  }
+  if (err instanceof Error) return err.message;
+  return "Action impossible";
 }
 
 async function fetchWeekPdf(
@@ -106,6 +149,9 @@ export function SchedulePage() {
   const qc = useQueryClient();
   const [weekStart, setWeekStart] = useState(() => mondayOf(new Date()));
   const [selected, setSelected] = useState<Entry | null>(null);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [form, setForm] = useState(entryEmpty);
+  const [localError, setLocalError] = useState<string | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState<string | null>(null);
@@ -113,8 +159,22 @@ export function SchedulePage() {
   const weekParam = fmt(weekStart);
   const { data = [], isLoading, error, refetch } = useQuery({
     queryKey: ["schedule", weekParam],
-    queryFn: () =>
-      api<Entry[]>(`/admin/schedule?week_start=${weekParam}`),
+    queryFn: () => api<Entry[]>(`/admin/schedule?week_start=${weekParam}`),
+  });
+  const { data: courses = [] } = useQuery({
+    queryKey: ["courses"],
+    queryFn: () => api<Course[]>("/admin/courses"),
+    enabled: createOpen,
+  });
+  const { data: rooms = [] } = useQuery({
+    queryKey: ["rooms"],
+    queryFn: () => api<Room[]>("/admin/rooms"),
+    enabled: createOpen,
+  });
+  const { data: timeslots = [] } = useQuery({
+    queryKey: ["timeslots"],
+    queryFn: () => api<TimeSlot[]>("/admin/timeslots"),
+    enabled: createOpen,
   });
 
   useEffect(() => {
@@ -130,6 +190,25 @@ export function SchedulePage() {
     });
     setPreviewName(null);
   };
+
+  const create = useMutation({
+    mutationFn: () =>
+      api("/admin/schedule", {
+        method: "POST",
+        body: JSON.stringify({
+          course_id: Number(form.course_id),
+          room_id: Number(form.room_id),
+          timeslot_id: Number(form.timeslot_id),
+          entry_date: form.entry_date,
+          status: "scheduled",
+        }),
+      }),
+    onSuccess: () => {
+      closeCreateModal();
+      void qc.invalidateQueries({ queryKey: ["schedule"] });
+    },
+    onError: (err: unknown) => setLocalError(formatApiError(err)),
+  });
 
   const cancel = useMutation({
     mutationFn: (id: number) =>
@@ -183,7 +262,47 @@ export function SchedulePage() {
     return map;
   }, [data]);
 
+  const slotsForDate = useMemo(() => {
+    if (!form.entry_date) return timeslots;
+    const dow = dayOfWeekMondayBased(form.entry_date);
+    return timeslots.filter((s) => s.day_of_week === dow);
+  }, [timeslots, form.entry_date]);
+
+  function closeCreateModal() {
+    setCreateOpen(false);
+    setForm(entryEmpty);
+    setLocalError(null);
+    create.reset();
+  }
+
+  function openCreate(defaultDate?: string) {
+    setForm({
+      ...entryEmpty,
+      entry_date: defaultDate || weekParam,
+    });
+    setLocalError(null);
+    create.reset();
+    setCreateOpen(true);
+  }
+
+  function onSubmit(e: FormEvent) {
+    e.preventDefault();
+    setLocalError(null);
+    if (
+      !form.course_id ||
+      !form.room_id ||
+      !form.timeslot_id ||
+      !form.entry_date
+    ) {
+      setLocalError("Renseignez cours, salle, créneau et date");
+      return;
+    }
+    create.mutate();
+  }
+
   const pdfBusy = exportPdf.isPending || previewPdf.isPending;
+  const canCreate =
+    courses.length > 0 && rooms.length > 0 && timeslots.length > 0;
 
   return (
     <div>
@@ -192,6 +311,7 @@ export function SchedulePage() {
         subtitle={`Du ${days[0].toLocaleDateString("fr-FR", { day: "2-digit", month: "long" })} au ${days[4].toLocaleDateString("fr-FR", { day: "2-digit", month: "long", year: "numeric" })}`}
         actions={
           <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
+            <Button onClick={() => openCreate()}>Ajouter</Button>
             <Button
               variant="ghost"
               onClick={() => previewPdf.mutate()}
@@ -251,14 +371,15 @@ export function SchedulePage() {
             annulée(s)
           </span>
           <span className="text-ink-soft">
-            Sélectionnez une séance pour consulter son détail.
+            Sélectionnez une séance pour consulter son détail, ou Ajouter pour
+            en créer une.
           </span>
         </div>
       ) : null}
       {isLoading ? (
         <p className="text-ink-soft">Chargement…</p>
       ) : error ? (
-        <Card className="p-5 border-warn/30">
+        <Card className="border-warn/30 p-5">
           <p className="font-semibold">Le planning n’a pas pu être chargé.</p>
           <button
             className="mt-2 min-h-11 text-sm font-semibold text-accent underline"
@@ -273,30 +394,39 @@ export function SchedulePage() {
             const key = fmt(d);
             const entries = byDate[key] || [];
             return (
-              <Card key={key} className="p-3 min-h-40 xl:min-h-56">
-                <div className="text-xs uppercase tracking-wide text-ink-soft mb-2">
-                  {d.toLocaleDateString("fr-FR", {
-                    weekday: "short",
-                    day: "2-digit",
-                    month: "short",
-                  })}
+              <Card key={key} className="min-h-40 p-3 xl:min-h-56">
+                <div className="mb-2 flex items-center justify-between gap-2">
+                  <div className="text-xs uppercase tracking-wide text-ink-soft">
+                    {d.toLocaleDateString("fr-FR", {
+                      weekday: "short",
+                      day: "2-digit",
+                      month: "short",
+                    })}
+                  </div>
+                  <button
+                    type="button"
+                    className="text-xs font-semibold text-accent hover:underline"
+                    onClick={() => openCreate(key)}
+                  >
+                    +
+                  </button>
                 </div>
                 <div className="space-y-2">
                   {entries.length === 0 ? (
-                    <div className="text-xs text-ink-soft/70 italic">Libre</div>
+                    <div className="text-xs italic text-ink-soft/70">Libre</div>
                   ) : (
                     entries.map((e) => (
                       <button
                         key={e.id}
                         onClick={() => setSelected(e)}
-                        className={`w-full min-h-11 text-left rounded-xl border px-3 py-2.5 text-xs transition hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${
+                        className={`w-full min-h-11 rounded-xl border px-3 py-2.5 text-left text-xs transition hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${
                           STATUS_COLOR[e.status] || STATUS_COLOR.scheduled
                         }`}
                       >
                         <div className="font-semibold">
                           {e.course_title || `Cours #${e.course_id}`}
                         </div>
-                        <div className="opacity-80 mt-0.5">
+                        <div className="mt-0.5 opacity-80">
                           {e.timeslot_label} · {e.room_name}
                         </div>
                         <div className="opacity-70">{e.teacher_name}</div>
@@ -312,7 +442,7 @@ export function SchedulePage() {
 
       {selected ? (
         <div
-          className="fixed inset-0 bg-ink/55 grid place-items-center p-4 z-50"
+          className="fixed inset-0 z-50 grid place-items-center bg-ink/55 p-4"
           role="presentation"
           onMouseDown={() => setSelected(null)}
         >
@@ -326,11 +456,11 @@ export function SchedulePage() {
             <Card className="w-full p-5 sm:p-6">
               <h3
                 id="schedule-detail-title"
-                className="text-xl font-[family-name:var(--font-display)] mb-3"
+                className="mb-3 text-xl font-[family-name:var(--font-display)]"
               >
                 Séance #{selected.id}
               </h3>
-              <dl className="text-sm space-y-2 mb-5">
+              <dl className="mb-5 space-y-2 text-sm">
                 <div className="flex justify-between gap-4">
                   <dt className="text-ink-soft">Cours</dt>
                   <dd>{selected.course_title}</dd>
@@ -360,19 +490,139 @@ export function SchedulePage() {
                   <dd>{STATUS_LABEL[selected.status] || selected.status}</dd>
                 </div>
               </dl>
-              <div className="flex gap-2 justify-end">
+              <div className="flex justify-end gap-2">
                 <Button variant="ghost" onClick={() => setSelected(null)}>
                   Fermer
                 </Button>
                 {selected.status === "scheduled" ? (
                   <Button
                     variant="danger"
-                    onClick={() => cancel.mutate(selected.id)}
+                    onClick={() => {
+                      if (
+                        window.confirm(
+                          `Annuler la séance « ${selected.course_title} » ?`
+                        )
+                      ) {
+                        cancel.mutate(selected.id);
+                      }
+                    }}
                   >
                     Annuler la séance
                   </Button>
                 ) : null}
               </div>
+            </Card>
+          </div>
+        </div>
+      ) : null}
+
+      {createOpen ? (
+        <div
+          className="fixed inset-0 z-50 grid place-items-center bg-ink/55 p-4"
+          role="presentation"
+          onMouseDown={closeCreateModal}
+        >
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="schedule-create-title"
+            className="w-full max-w-lg"
+            onMouseDown={(event) => event.stopPropagation()}
+          >
+            <Card className="w-full p-5 sm:p-6">
+              <h3
+                id="schedule-create-title"
+                className="mb-4 text-xl font-[family-name:var(--font-display)]"
+              >
+                Nouvelle séance
+              </h3>
+              {!canCreate ? (
+                <p className="mb-3 text-sm text-warn">
+                  Vérifiez qu&apos;il existe des cours, salles et créneaux.
+                </p>
+              ) : null}
+              <form className="space-y-3" onSubmit={onSubmit}>
+                <Select
+                  label="Cours"
+                  value={form.course_id}
+                  onChange={(e) =>
+                    setForm({ ...form, course_id: e.target.value })
+                  }
+                  required
+                  autoFocus
+                >
+                  <option value="">Choisir…</option>
+                  {courses.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.title}
+                      {c.group_name ? ` — ${c.group_name}` : ""}
+                    </option>
+                  ))}
+                </Select>
+                <Input
+                  label="Date"
+                  type="date"
+                  value={form.entry_date}
+                  min={weekParam}
+                  max={fmt(days[4])}
+                  onChange={(e) =>
+                    setForm({
+                      ...form,
+                      entry_date: e.target.value,
+                      timeslot_id: "",
+                    })
+                  }
+                  required
+                />
+                <Select
+                  label="Créneau"
+                  value={form.timeslot_id}
+                  onChange={(e) =>
+                    setForm({ ...form, timeslot_id: e.target.value })
+                  }
+                  required
+                >
+                  <option value="">Choisir…</option>
+                  {slotsForDate.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.label} ({s.start_time}–{s.end_time})
+                    </option>
+                  ))}
+                </Select>
+                <Select
+                  label="Salle"
+                  value={form.room_id}
+                  onChange={(e) =>
+                    setForm({ ...form, room_id: e.target.value })
+                  }
+                  required
+                >
+                  <option value="">Choisir…</option>
+                  {rooms.map((r) => (
+                    <option key={r.id} value={r.id}>
+                      {r.name} ({r.capacity} places)
+                    </option>
+                  ))}
+                </Select>
+                {localError ? (
+                  <p className="text-sm text-warn">{localError}</p>
+                ) : null}
+                <div className="flex justify-end gap-2 pt-2">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={closeCreateModal}
+                  >
+                    Annuler
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={create.isPending || !canCreate}
+                  >
+                    {create.isPending ? "Ajout…" : "Ajouter"}
+                  </Button>
+                </div>
+              </form>
             </Card>
           </div>
         </div>

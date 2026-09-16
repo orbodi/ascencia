@@ -6,8 +6,22 @@ from app.admin.deps import require_admin_user, require_admin_write
 from app.admin.schemas_crud import TeacherIn, TeacherOut
 from app.api.deps import get_db
 from app.domain.models import AdminUser, Teacher
+from app.whatsapp.client import normalize_phone
 
 router = APIRouter(prefix="/admin/teachers", tags=["admin-teachers"])
+
+
+def _normalize_teacher_payload(body: TeacherIn) -> dict:
+    data = body.model_dump()
+    data["name"] = data["name"].strip()
+    data["email"] = str(data["email"]).strip().lower()
+    phone = (data.get("phone_whatsapp") or "").strip()
+    if not phone:
+        data["phone_whatsapp"] = None
+    else:
+        digits = normalize_phone(phone)
+        data["phone_whatsapp"] = f"+{digits}" if digits else None
+    return data
 
 
 @router.get("", response_model=list[TeacherOut])
@@ -25,10 +39,15 @@ async def create_teacher(
     _user: AdminUser = Depends(require_admin_write),
     session: AsyncSession = Depends(get_db),
 ) -> Teacher:
-    existing = await session.scalar(select(Teacher).where(Teacher.email == body.email))
+    payload = _normalize_teacher_payload(body)
+    if not payload["name"]:
+        raise HTTPException(status_code=400, detail="Le nom est obligatoire")
+    existing = await session.scalar(
+        select(Teacher).where(Teacher.email == payload["email"])
+    )
     if existing:
         raise HTTPException(status_code=409, detail="Email déjà utilisé")
-    teacher = Teacher(**body.model_dump())
+    teacher = Teacher(**payload)
     session.add(teacher)
     await session.commit()
     await session.refresh(teacher)
@@ -45,7 +64,18 @@ async def update_teacher(
     teacher = await session.get(Teacher, teacher_id)
     if teacher is None:
         raise HTTPException(status_code=404, detail="Enseignant introuvable")
-    for key, value in body.model_dump().items():
+    payload = _normalize_teacher_payload(body)
+    if not payload["name"]:
+        raise HTTPException(status_code=400, detail="Le nom est obligatoire")
+    clash = await session.scalar(
+        select(Teacher).where(
+            Teacher.email == payload["email"],
+            Teacher.id != teacher_id,
+        )
+    )
+    if clash:
+        raise HTTPException(status_code=409, detail="Email déjà utilisé")
+    for key, value in payload.items():
         setattr(teacher, key, value)
     await session.commit()
     await session.refresh(teacher)

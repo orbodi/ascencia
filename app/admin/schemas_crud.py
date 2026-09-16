@@ -64,6 +64,22 @@ class CourseIn(BaseModel):
     priority: int = Field(default=0, ge=0, le=100)
     prerequisite_course_id: int | None = Field(default=None, gt=0)
 
+    @model_validator(mode="after")
+    def validate_volumes(self) -> "CourseIn":
+        self.title = self.title.strip()
+        if not self.title:
+            raise ValueError("L'intitulé est obligatoire")
+        if self.planned_minutes < self.duration_minutes:
+            raise ValueError(
+                "Le volume prévu doit être au moins égal à la durée d'une séance"
+            )
+        if (
+            self.prerequisite_course_id is not None
+            and self.prerequisite_course_id <= 0
+        ):
+            raise ValueError("Prérequis invalide")
+        return self
+
 
 class CourseOut(CourseIn):
     id: int

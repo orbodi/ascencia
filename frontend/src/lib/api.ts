@@ -41,10 +41,15 @@ export async function api<T>(
     data = text;
   }
   if (!res.ok) {
-    const detail =
-      typeof data === "object" && data && "detail" in data
-        ? String((data as { detail: unknown }).detail)
-        : res.statusText;
+    let detail = res.statusText;
+    if (typeof data === "object" && data && "detail" in data) {
+      const raw = (data as { detail: unknown }).detail;
+      if (typeof raw === "string") {
+        detail = raw;
+      } else if (raw != null) {
+        detail = JSON.stringify(raw);
+      }
+    }
     throw new ApiError(res.status, detail);
   }
   return data as T;
