@@ -6,7 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from app.api.router import api_router
 from app.config import settings
@@ -111,6 +111,11 @@ app.add_middleware(
     allow_headers=["*"],
 )
 app.include_router(api_router)
+
+
+@app.get("/")
+async def root_redirect():
+    return RedirectResponse(url="/backoffice/", status_code=307)
 
 
 def _missing_dist_html() -> HTMLResponse:

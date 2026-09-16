@@ -28,12 +28,20 @@ const empty = {
   title: "",
   teacher_id: "",
   group_id: "",
-  duration_minutes: 120,
-  planned_minutes: 720,
+  duration_hours: 2,
+  planned_hours: 12,
   semester: 1,
   priority: 0,
   prerequisite_course_id: "",
 };
+
+function hoursToMinutes(hours: number): number {
+  return Math.round(Number(hours) * 60);
+}
+
+function minutesToHours(minutes: number): number {
+  return Math.round((Number(minutes) / 60) * 100) / 100;
+}
 
 function progressPct(c: Course): number {
   const done = (c.scheduled_sessions || 0) * c.duration_minutes;
@@ -69,8 +77,8 @@ export function CoursesPage() {
           title: form.title.trim(),
           teacher_id: Number(form.teacher_id),
           group_id: Number(form.group_id),
-          duration_minutes: Number(form.duration_minutes),
-          planned_minutes: Number(form.planned_minutes),
+          duration_minutes: hoursToMinutes(form.duration_hours),
+          planned_minutes: hoursToMinutes(form.planned_hours),
           semester: Number(form.semester),
           priority: Number(form.priority),
           prerequisite_course_id: form.prerequisite_course_id
@@ -112,8 +120,8 @@ export function CoursesPage() {
       title: c.title,
       teacher_id: String(c.teacher_id),
       group_id: String(c.group_id),
-      duration_minutes: c.duration_minutes,
-      planned_minutes: c.planned_minutes,
+      duration_hours: minutesToHours(c.duration_minutes),
+      planned_hours: minutesToHours(c.planned_minutes),
       semester: c.semester,
       priority: c.priority,
       prerequisite_course_id: c.prerequisite_course_id
@@ -287,28 +295,30 @@ export function CoursesPage() {
                 </Select>
                 <div className="grid grid-cols-2 gap-3">
                   <Input
-                    label="Durée séance (min)"
+                    label="Durée séance (h)"
                     type="number"
-                    min={15}
-                    max={720}
-                    value={form.duration_minutes}
+                    min={0.25}
+                    max={12}
+                    step={0.25}
+                    value={form.duration_hours}
                     onChange={(e) =>
                       setForm({
                         ...form,
-                        duration_minutes: Number(e.target.value),
+                        duration_hours: Number(e.target.value),
                       })
                     }
                     required
                   />
                   <Input
-                    label="Volume prévu (min)"
+                    label="Volume prévu (h)"
                     type="number"
-                    min={15}
-                    value={form.planned_minutes}
+                    min={0.25}
+                    step={0.25}
+                    value={form.planned_hours}
                     onChange={(e) =>
                       setForm({
                         ...form,
-                        planned_minutes: Number(e.target.value),
+                        planned_hours: Number(e.target.value),
                       })
                     }
                     required
