@@ -1,7 +1,7 @@
 import { FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { Button, Card, Input, PageHeader, Select } from "../components/ui";
+import { Button, Card, Input, Modal, PageHeader, Select } from "../components/ui";
 
 type Teacher = {
   id: number;
@@ -48,17 +48,27 @@ export function TeachersPage() {
   const save = useMutation({
     mutationFn: () => {
       const phone = formatWhatsAppInput(form.phone_whatsapp);
-      return api(editingId ? `/admin/teachers/${editingId}` : "/admin/teachers", {
-        method: editingId ? "PATCH" : "POST",
-        body: JSON.stringify({
-          name: form.name.trim(),
-          email: form.email.trim().toLowerCase(),
-          phone_whatsapp: phone || null,
-          is_active: form.is_active,
-        }),
-      });
+      return api<Teacher>(
+        editingId ? `/admin/teachers/${editingId}` : "/admin/teachers",
+        {
+          method: editingId ? "PATCH" : "POST",
+          body: JSON.stringify({
+            name: form.name.trim(),
+            email: form.email.trim().toLowerCase(),
+            phone_whatsapp: phone || null,
+            is_active: form.is_active,
+          }),
+        }
+      );
     },
-    onSuccess: () => {
+    onSuccess: (teacher) => {
+      qc.setQueryData<Teacher[]>(["teachers"], (prev) => {
+        const list = prev ? [...prev] : [];
+        const index = list.findIndex((t) => t.id === teacher.id);
+        if (index >= 0) list[index] = teacher;
+        else list.push(teacher);
+        return list.sort((a, b) => a.name.localeCompare(b.name, "fr"));
+      });
       closeModal();
       void qc.invalidateQueries({ queryKey: ["teachers"] });
     },
@@ -251,93 +261,75 @@ export function TeachersPage() {
         </table>
       </Card>
 
-      {open ? (
-        <div
-          className="fixed inset-0 z-50 grid place-items-center bg-ink/55 p-4"
-          role="presentation"
-          onMouseDown={closeModal}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="teacher-form-title"
-            className="w-full max-w-lg"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <Card className="w-full p-5 sm:p-6">
-              <h3
-                id="teacher-form-title"
-                className="mb-4 text-xl font-[family-name:var(--font-display)]"
-              >
-                {editingId ? "Modifier l'enseignant" : "Nouvel enseignant"}
-              </h3>
-              <form className="space-y-3" onSubmit={onSubmit}>
-                <Input
-                  label="Nom complet"
-                  value={form.name}
-                  onChange={(e) => setForm({ ...form, name: e.target.value })}
-                  required
-                  autoFocus
-                  placeholder="Ama Mensah"
-                />
-                <Input
-                  label="Email"
-                  type="email"
-                  value={form.email}
-                  onChange={(e) => setForm({ ...form, email: e.target.value })}
-                  required
-                  placeholder="ama.mensah@example.com"
-                />
-                <Input
-                  label="WhatsApp"
-                  placeholder="+22890000000"
-                  value={form.phone_whatsapp}
-                  onChange={(e) =>
-                    setForm({
-                      ...form,
-                      phone_whatsapp: formatWhatsAppInput(e.target.value),
-                    })
-                  }
-                />
-                <p className="text-xs text-ink-soft -mt-1">
-                  Indicatif pays inclus (ex. +228…). Requis pour les campagnes
-                  WhatsApp.
-                </p>
-                {editingId ? (
-                  <Select
-                    label="Statut"
-                    value={form.is_active ? "1" : "0"}
-                    onChange={(e) =>
-                      setForm({ ...form, is_active: e.target.value === "1" })
-                    }
-                  >
-                    <option value="1">Actif</option>
-                    <option value="0">Archivé</option>
-                  </Select>
-                ) : null}
-                {save.isError ? (
-                  <p className="text-sm text-warn">
-                    {(save.error as Error)?.message ||
-                      "Enregistrement impossible"}
-                  </p>
-                ) : null}
-                <div className="flex justify-end gap-2 pt-2">
-                  <Button type="button" variant="ghost" onClick={closeModal}>
-                    Annuler
-                  </Button>
-                  <Button type="submit" disabled={save.isPending}>
-                    {save.isPending
-                      ? "Enregistrement…"
-                      : editingId
-                        ? "Enregistrer"
-                        : "Ajouter"}
-                  </Button>
-                </div>
-              </form>
-            </Card>
+      <Modal
+        open={open}
+        onClose={closeModal}
+        title={editingId ? "Modifier l'enseignant" : "Nouvel enseignant"}
+        titleId="teacher-form-title"
+      >
+        <form className="space-y-3" onSubmit={onSubmit}>
+          <Input
+            label="Nom complet"
+            value={form.name}
+            onChange={(e) => setForm({ ...form, name: e.target.value })}
+            required
+            autoFocus
+            placeholder="Ama Mensah"
+          />
+          <Input
+            label="Email"
+            type="email"
+            value={form.email}
+            onChange={(e) => setForm({ ...form, email: e.target.value })}
+            required
+            placeholder="ama.mensah@example.com"
+          />
+          <Input
+            label="WhatsApp"
+            placeholder="+22890000000"
+            value={form.phone_whatsapp}
+            onChange={(e) =>
+              setForm({
+                ...form,
+                phone_whatsapp: formatWhatsAppInput(e.target.value),
+              })
+            }
+          />
+          <p className="text-xs text-ink-soft -mt-1">
+            Indicatif pays inclus (ex. +228…). Requis pour les campagnes
+            WhatsApp.
+          </p>
+          {editingId ? (
+            <Select
+              label="Statut"
+              value={form.is_active ? "1" : "0"}
+              onChange={(e) =>
+                setForm({ ...form, is_active: e.target.value === "1" })
+              }
+            >
+              <option value="1">Actif</option>
+              <option value="0">Archivé</option>
+            </Select>
+          ) : null}
+          {save.isError ? (
+            <p className="text-sm text-warn">
+              {(save.error as Error)?.message || "Enregistrement impossible"}
+            </p>
+          ) : null}
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="ghost" onClick={closeModal}>
+              Annuler
+            </Button>
+            <Button type="submit" disabled={save.isPending}>
+              {save.isPending
+                ? "Enregistrement…"
+                : editingId
+                  ? "Enregistrer"
+                  : "Ajouter"}
+            </Button>
           </div>
-        </div>
-      ) : null}
+        </form>
+      </Modal>
     </div>
   );
 }

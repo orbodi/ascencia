@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api, getToken } from "../lib/api";
-import { Button, Card, Input, PageHeader, Select } from "../components/ui";
+import { Button, Card, Input, Modal, PageHeader, Select } from "../components/ui";
 
 type Entry = {
   id: number;
@@ -440,26 +440,14 @@ export function SchedulePage() {
         </div>
       )}
 
-      {selected ? (
-        <div
-          className="fixed inset-0 z-50 grid place-items-center bg-ink/55 p-4"
-          role="presentation"
-          onMouseDown={() => setSelected(null)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="schedule-detail-title"
-            className="w-full max-w-md"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <Card className="w-full p-5 sm:p-6">
-              <h3
-                id="schedule-detail-title"
-                className="mb-3 text-xl font-[family-name:var(--font-display)]"
-              >
-                Séance #{selected.id}
-              </h3>
+      <Modal
+        open={!!selected}
+        onClose={() => setSelected(null)}
+        title={selected ? `Séance #${selected.id}` : "Séance"}
+        titleId="schedule-detail-title"
+      >
+              {selected ? (
+                <>
               <dl className="mb-5 space-y-2 text-sm">
                 <div className="flex justify-between gap-4">
                   <dt className="text-ink-soft">Cours</dt>
@@ -511,31 +499,16 @@ export function SchedulePage() {
                   </Button>
                 ) : null}
               </div>
-            </Card>
-          </div>
-        </div>
-      ) : null}
+                </>
+              ) : null}
+      </Modal>
 
-      {createOpen ? (
-        <div
-          className="fixed inset-0 z-50 grid place-items-center bg-ink/55 p-4"
-          role="presentation"
-          onMouseDown={closeCreateModal}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="schedule-create-title"
-            className="w-full max-w-lg"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <Card className="w-full p-5 sm:p-6">
-              <h3
-                id="schedule-create-title"
-                className="mb-4 text-xl font-[family-name:var(--font-display)]"
-              >
-                Nouvelle séance
-              </h3>
+      <Modal
+        open={createOpen}
+        onClose={closeCreateModal}
+        title="Nouvelle séance"
+        titleId="schedule-create-title"
+      >
               {!canCreate ? (
                 <p className="mb-3 text-sm text-warn">
                   Vérifiez qu&apos;il existe des cours, salles et créneaux.
@@ -623,10 +596,7 @@ export function SchedulePage() {
                   </Button>
                 </div>
               </form>
-            </Card>
-          </div>
-        </div>
-      ) : null}
+      </Modal>
 
       {previewUrl ? (
         <div

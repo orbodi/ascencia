@@ -1,7 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { Button, Card, Input, PageHeader, Select } from "../components/ui";
+import { Button, Card, Input, Modal, PageHeader, Select } from "../components/ui";
 
 type Level = { id: number; code: string; label: string };
 
@@ -461,26 +461,12 @@ export function CurriculumPage() {
         </Card>
       </div>
 
-      {createOpen ? (
-        <div
-          className="fixed inset-0 z-50 grid place-items-center bg-ink/55 p-4"
-          role="presentation"
-          onMouseDown={closeCreateModal}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="curriculum-create-title"
-            className="w-full max-w-lg"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <Card className="w-full p-5 sm:p-6">
-              <h3
-                id="curriculum-create-title"
-                className="mb-4 text-xl font-[family-name:var(--font-display)]"
-              >
-                Nouveau programme
-              </h3>
+      <Modal
+        open={createOpen}
+        onClose={closeCreateModal}
+        title="Nouveau programme"
+        titleId="curriculum-create-title"
+      >
               {levels.length === 0 ? (
                 <p className="mb-3 text-sm text-warn">
                   Ajoutez d&apos;abord un parcours (Niveaux / Parcours).
@@ -554,10 +540,7 @@ export function CurriculumPage() {
                   </Button>
                 </div>
               </form>
-            </Card>
-          </div>
-        </div>
-      ) : null}
+      </Modal>
     </div>
   );
 }

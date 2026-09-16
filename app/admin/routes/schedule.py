@@ -17,6 +17,7 @@ from app.api.deps import get_db
 from app.domain.models import (
     AdminUser,
     Course,
+    ScheduleChange,
     ScheduleEntry,
     ScheduleEntryStatus,
     TimeSlot,
@@ -74,6 +75,53 @@ async def create_timeslot(
         "end_time": slot.end_time.strftime("%H:%M"),
         "label": slot.label,
     }
+
+
+@router.patch("/admin/timeslots/{timeslot_id}", response_model=TimeSlotOut)
+async def update_timeslot(
+    timeslot_id: int,
+    body: TimeSlotIn,
+    _user: AdminUser = Depends(require_admin_write),
+    session: AsyncSession = Depends(get_db),
+) -> dict:
+    slot = await session.get(TimeSlot, timeslot_id)
+    if slot is None:
+        raise HTTPException(status_code=404, detail="Créneau introuvable")
+    slot.day_of_week = body.day_of_week
+    slot.start_time = _parse_time(body.start_time)
+    slot.end_time = _parse_time(body.end_time)
+    slot.label = body.label
+    await session.commit()
+    await session.refresh(slot)
+    return {
+        "id": slot.id,
+        "day_of_week": slot.day_of_week,
+        "start_time": slot.start_time.strftime("%H:%M"),
+        "end_time": slot.end_time.strftime("%H:%M"),
+        "label": slot.label,
+    }
+
+
+@router.delete("/admin/timeslots/{timeslot_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_timeslot(
+    timeslot_id: int,
+    _user: AdminUser = Depends(require_admin_write),
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    slot = await session.get(TimeSlot, timeslot_id)
+    if slot is None:
+        raise HTTPException(status_code=404, detail="Créneau introuvable")
+    in_use = await session.scalar(
+        select(ScheduleEntry.id).where(ScheduleEntry.timeslot_id == timeslot_id).limit(1)
+    )
+    if in_use is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Créneau utilisé par au moins une séance planifiée ; "
+            "retirez ou déplacez ces séances avant de le supprimer.",
+        )
+    await session.delete(slot)
+    await session.commit()
 
 
 @router.get("/admin/schedule", response_model=list[ScheduleEntryOut])
@@ -193,6 +241,37 @@ async def cancel_schedule_entry(
         "entry_date": entry.entry_date,
         "status": entry.status,
     }
+
+
+@router.delete("/admin/schedule/{entry_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_schedule_entry(
+    entry_id: int,
+    _user: AdminUser = Depends(require_admin_write),
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    """Suppression définitive d'une séance.
+
+    Distincte de /cancel (annulation douce, conserve la ligne et son
+    historique). Bloquée si des propositions de changement (ScheduleChange)
+    référencent encore cette séance, afin de ne pas casser la traçabilité
+    des demandes de report en cours ou déjà traitées : annulez la séance,
+    ou traitez/supprimez ces propositions d'abord.
+    """
+    entry = await session.get(ScheduleEntry, entry_id)
+    if entry is None:
+        raise HTTPException(status_code=404, detail="Séance introuvable")
+    linked_change = await session.scalar(
+        select(ScheduleChange.id).where(ScheduleChange.entry_id == entry_id).limit(1)
+    )
+    if linked_change is not None:
+        raise HTTPException(
+            status_code=409,
+            detail="Des propositions de changement référencent encore cette séance ; "
+            "annulez-la (statut cancelled) plutôt que de la supprimer, ou "
+            "traitez ces propositions d'abord.",
+        )
+    await session.delete(entry)
+    await session.commit()
 
 
 @router.get("/admin/schedule/export/pdf")

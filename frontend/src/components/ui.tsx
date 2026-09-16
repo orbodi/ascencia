@@ -1,4 +1,5 @@
-import type { ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 
 export function PageHeader({
   title,
@@ -27,6 +28,68 @@ export function PageHeader({
         </div>
       ) : null}
     </div>
+  );
+}
+
+/** Modal en portal (évite le clip overflow / stacking du layout). */
+export function Modal({
+  open,
+  onClose,
+  title,
+  titleId,
+  children,
+  wide = false,
+}: {
+  open: boolean;
+  onClose: () => void;
+  title: string;
+  titleId: string;
+  children: ReactNode;
+  wide?: boolean;
+}) {
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const onKey = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [open, onClose]);
+
+  if (!open || typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      className="fixed inset-0 z-[100] grid place-items-center bg-ink/55 p-4"
+      role="presentation"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        className={`w-full ${wide ? "max-w-2xl" : "max-w-lg"}`}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <Card className="w-full p-5 sm:p-6">
+          <h3
+            id={titleId}
+            className="mb-4 text-xl font-[family-name:var(--font-display)]"
+          >
+            {title}
+          </h3>
+          {children}
+        </Card>
+      </div>
+    </div>,
+    document.body
   );
 }
 

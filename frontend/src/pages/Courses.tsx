@@ -1,7 +1,7 @@
 import { FormEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { Button, Card, Input, PageHeader, Select } from "../components/ui";
+import { Button, Card, Input, Modal, PageHeader, Select } from "../components/ui";
 
 type Course = {
   id: number;
@@ -266,26 +266,12 @@ export function CoursesPage() {
         </table>
       </Card>
 
-      {open ? (
-        <div
-          className="fixed inset-0 z-50 grid place-items-center bg-ink/55 p-4"
-          role="presentation"
-          onMouseDown={closeModal}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="course-form-title"
-            className="w-full max-w-lg"
-            onMouseDown={(event) => event.stopPropagation()}
-          >
-            <Card className="w-full p-5 sm:p-6">
-              <h3
-                id="course-form-title"
-                className="mb-4 text-xl font-[family-name:var(--font-display)]"
-              >
-                {editingId ? "Modifier le cours" : "Nouveau cours"}
-              </h3>
+      <Modal
+        open={open}
+        onClose={closeModal}
+        title={editingId ? "Modifier le cours" : "Nouveau cours"}
+        titleId="course-form-title"
+      >
               {!canCreate && !editingId ? (
                 <p className="mb-3 text-sm text-warn">
                   {activeTeachers.length === 0
@@ -435,10 +421,7 @@ export function CoursesPage() {
                   </Button>
                 </div>
               </form>
-            </Card>
-          </div>
-        </div>
-      ) : null}
+      </Modal>
     </div>
   );
 }

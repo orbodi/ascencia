@@ -64,7 +64,7 @@ export function Layout() {
             </button>
           </div>
         </header>
-        <main className="flex-1 p-4 sm:p-6 md:p-8 overflow-x-hidden">
+        <main className="flex-1 p-4 sm:p-6 md:p-8">
           <div className="max-w-6xl mx-auto animate-fade-in">
             <Outlet />
           </div>

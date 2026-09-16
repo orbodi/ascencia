@@ -186,6 +186,16 @@ class CurriculumService:
             _ = planned_sessions  # used below after flush
 
         await self.session.commit()
+        # `plan` (donc `plan.items`) a été chargé en mémoire au tout début de cette
+        # méthode, avant l'insertion des nouvelles lignes. Comme les nouvelles
+        # CurriculumWeekItem sont rattachées par clé étrangère (session.add) et non
+        # via la collection Python plan.items, et que la session ne réexpire pas les
+        # objets après commit (expire_on_commit=False), un simple get_plan(plan_id)
+        # renverrait l'objet déjà en mémoire avec sa collection `items` obsolète
+        # (vide ou incomplète), même si les données sont bien en base. On force donc
+        # l'expiration de la relation avant de recharger, pour que le prochain
+        # get_plan() la recharge réellement depuis la base.
+        self.session.expire(plan, ["items"])
         loaded = await self.get_plan(plan_id)
         assert loaded is not None
         volume_warnings = self._volume_warnings(loaded)
