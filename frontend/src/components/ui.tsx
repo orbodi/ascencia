@@ -1,4 +1,4 @@
-import { useEffect, type ReactNode } from "react";
+import { useEffect, useId, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 
 export function PageHeader({
@@ -90,6 +90,54 @@ export function Modal({
       </div>
     </div>,
     document.body
+  );
+}
+
+/**
+ * Modale de confirmation générique pour les actions destructrices
+ * (suppression...). Remplace `window.confirm`, qui bloque le thread JS,
+ * n'est pas stylée et coupe court à tout état de chargement (le bouton ne
+ * peut pas afficher "Suppression…" pendant l'appel réseau).
+ */
+export function ConfirmDialog({
+  open,
+  title,
+  message,
+  confirmLabel = "Supprimer",
+  cancelLabel = "Annuler",
+  danger = true,
+  pending = false,
+  onConfirm,
+  onCancel,
+}: {
+  open: boolean;
+  title: string;
+  message: ReactNode;
+  confirmLabel?: string;
+  cancelLabel?: string;
+  danger?: boolean;
+  pending?: boolean;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const titleId = useId();
+  return (
+    <Modal open={open} onClose={onCancel} title={title} titleId={titleId}>
+      <div className="text-sm text-ink-soft">{message}</div>
+      <div className="mt-5 flex justify-end gap-2">
+        <Button type="button" variant="ghost" onClick={onCancel} disabled={pending}>
+          {cancelLabel}
+        </Button>
+        <Button
+          type="button"
+          variant={danger ? "danger" : "primary"}
+          disabled={pending}
+          onClick={onConfirm}
+        >
+          {pending ? "Patientez…" : confirmLabel}
+        </Button>
+      </div>
+    </Modal>
   );
 }
 

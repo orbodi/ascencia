@@ -1,7 +1,15 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ApiError, api, getToken } from "../lib/api";
-import { Button, Card, Input, Modal, PageHeader, Select } from "../components/ui";
+import {
+  Button,
+  Card,
+  ConfirmDialog,
+  Input,
+  Modal,
+  PageHeader,
+  Select,
+} from "../components/ui";
 
 type Entry = {
   id: number;
@@ -162,6 +170,7 @@ export function SchedulePage() {
   const [form, setForm] = useState(entryEmpty);
   const [localError, setLocalError] = useState<string | null>(null);
   const [entryActionError, setEntryActionError] = useState<string | null>(null);
+  const [confirmDeleteEntry, setConfirmDeleteEntry] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState<string | null>(null);
@@ -169,6 +178,9 @@ export function SchedulePage() {
   const [slotForm, setSlotForm] = useState(slotEmpty);
   const [editingSlotId, setEditingSlotId] = useState<number | null>(null);
   const [slotError, setSlotError] = useState<string | null>(null);
+  const [confirmDeleteSlot, setConfirmDeleteSlot] = useState<TimeSlot | null>(
+    null
+  );
 
   const weekParam = fmt(weekStart);
   const { data = [], isLoading, error, refetch } = useQuery({
@@ -239,9 +251,13 @@ export function SchedulePage() {
       api(`/admin/schedule/${id}`, { method: "DELETE" }),
     onSuccess: () => {
       setSelected(null);
+      setConfirmDeleteEntry(false);
       void qc.invalidateQueries({ queryKey: ["schedule"] });
     },
-    onError: (err: unknown) => setEntryActionError(formatApiError(err)),
+    onError: (err: unknown) => {
+      setConfirmDeleteEntry(false);
+      setEntryActionError(formatApiError(err));
+    },
   });
 
   const saveSlot = useMutation({
@@ -271,9 +287,13 @@ export function SchedulePage() {
         setSlotForm(slotEmpty);
       }
       setSlotError(null);
+      setConfirmDeleteSlot(null);
       void qc.invalidateQueries({ queryKey: ["timeslots"] });
     },
-    onError: (err: unknown) => setSlotError(formatApiError(err)),
+    onError: (err: unknown) => {
+      setConfirmDeleteSlot(null);
+      setSlotError(formatApiError(err));
+    },
   });
 
   function closeSlotsModal() {
@@ -281,6 +301,7 @@ export function SchedulePage() {
     setEditingSlotId(null);
     setSlotForm(slotEmpty);
     setSlotError(null);
+    setConfirmDeleteSlot(null);
     saveSlot.reset();
   }
 
@@ -508,7 +529,7 @@ export function SchedulePage() {
                           STATUS_COLOR[e.status] || STATUS_COLOR.scheduled
                         }`}
                       >
-                        <div className="font-semibold">
+                        <div className="break-words font-semibold">
                           {e.course_title || `Cours #${e.course_id}`}
                         </div>
                         <div className="mt-0.5 opacity-80">
@@ -530,6 +551,7 @@ export function SchedulePage() {
         onClose={() => {
           setSelected(null);
           setEntryActionError(null);
+          setConfirmDeleteEntry(false);
         }}
         title={selected ? `Séance #${selected.id}` : "Séance"}
         titleId="schedule-detail-title"
@@ -575,6 +597,7 @@ export function SchedulePage() {
                   onClick={() => {
                     setSelected(null);
                     setEntryActionError(null);
+                    setConfirmDeleteEntry(false);
                   }}
                 >
                   Fermer
@@ -598,24 +621,29 @@ export function SchedulePage() {
                 ) : null}
                 <Button
                   variant="danger"
-                  disabled={deleteEntry.isPending}
                   onClick={() => {
                     setEntryActionError(null);
-                    if (
-                      window.confirm(
-                        `Supprimer définitivement la séance « ${selected.course_title} » ? Cette action est irréversible (contrairement à l'annulation, la séance ne sera plus conservée dans l'historique).`
-                      )
-                    ) {
-                      deleteEntry.mutate(selected.id);
-                    }
+                    setConfirmDeleteEntry(true);
                   }}
                 >
-                  {deleteEntry.isPending ? "Suppression…" : "Supprimer"}
+                  Supprimer
                 </Button>
               </div>
                 </>
               ) : null}
       </Modal>
+
+      <ConfirmDialog
+        open={confirmDeleteEntry}
+        title="Supprimer la séance"
+        message={`Supprimer définitivement la séance « ${selected?.course_title} » ? Cette action est irréversible (contrairement à l'annulation, la séance ne sera plus conservée dans l'historique).`}
+        confirmLabel="Supprimer"
+        pending={deleteEntry.isPending}
+        onCancel={() => setConfirmDeleteEntry(false)}
+        onConfirm={() => {
+          if (selected) deleteEntry.mutate(selected.id);
+        }}
+      />
 
       <Modal
         open={createOpen}
@@ -847,16 +875,9 @@ export function SchedulePage() {
                             </Button>
                             <Button
                               variant="ghost"
-                              disabled={removeSlot.isPending}
                               onClick={() => {
                                 setSlotError(null);
-                                if (
-                                  window.confirm(
-                                    `Supprimer le créneau « ${s.label} » ?`
-                                  )
-                                ) {
-                                  removeSlot.mutate(s.id);
-                                }
+                                setConfirmDeleteSlot(s);
                               }}
                             >
                               Supprimer
@@ -871,6 +892,18 @@ export function SchedulePage() {
           </div>
         </div>
       </Modal>
+
+      <ConfirmDialog
+        open={confirmDeleteSlot !== null}
+        title="Supprimer le créneau"
+        message={`Supprimer le créneau « ${confirmDeleteSlot?.label} » ? Cette action est bloquée si des séances utilisent encore ce créneau.`}
+        confirmLabel="Supprimer"
+        pending={removeSlot.isPending}
+        onCancel={() => setConfirmDeleteSlot(null)}
+        onConfirm={() => {
+          if (confirmDeleteSlot) removeSlot.mutate(confirmDeleteSlot.id);
+        }}
+      />
 
       {previewUrl ? (
         <div

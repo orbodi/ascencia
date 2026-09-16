@@ -40,7 +40,7 @@ def test_schedule_template_uses_ascencia_logo_and_week_grid():
     assert logo.is_file() and logo.stat().st_size > 0
     assert 'src="logo-ak.png"' in template
     assert "Plage Horaire" in template
-    assert "EMPLOI DE TEMPS" in template
+    assert "EMPLOI DU TEMPS" in template
     assert "day.name" in template
     assert "FIN" in template
 

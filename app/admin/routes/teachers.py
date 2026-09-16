@@ -1,11 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.admin.deps import require_admin_user, require_admin_write
 from app.admin.schemas_crud import TeacherIn, TeacherOut
 from app.api.deps import get_db
-from app.domain.models import AdminUser, Teacher
+from app.domain.models import AdminUser, Availability, Course, PresenceRequest, Teacher
 from app.whatsapp.client import normalize_phone
 
 router = APIRouter(prefix="/admin/teachers", tags=["admin-teachers"])
@@ -92,4 +92,44 @@ async def archive_teacher(
     if teacher is None:
         raise HTTPException(status_code=404, detail="Enseignant introuvable")
     teacher.is_active = False
+    await session.commit()
+
+
+@router.delete("/{teacher_id}/permanent", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_teacher(
+    teacher_id: int,
+    _user: AdminUser = Depends(require_admin_write),
+    session: AsyncSession = Depends(get_db),
+) -> None:
+    """Suppression définitive (contrairement à `DELETE /{teacher_id}`, qui
+    ne fait qu'archiver). Bloquée (409) si l'enseignant est encore assigné à
+    des cours, pour ne pas casser l'intégrité référentielle du planning ; il
+    faut d'abord réassigner ou supprimer ces cours. Les disponibilités et
+    demandes de présence liées à l'enseignant, elles, sont de simples
+    données de collecte : elles sont supprimées avec lui.
+    """
+    teacher = await session.get(Teacher, teacher_id)
+    if teacher is None:
+        raise HTTPException(status_code=404, detail="Enseignant introuvable")
+    course_count = await session.scalar(
+        select(func.count())
+        .select_from(Course)
+        .where(Course.teacher_id == teacher_id)
+    )
+    if course_count:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Cet enseignant est assigné à des cours : suppression "
+                "définitive impossible. Réassignez ou supprimez d'abord "
+                "ces cours, ou archivez l'enseignant."
+            ),
+        )
+    await session.execute(
+        delete(Availability).where(Availability.teacher_id == teacher_id)
+    )
+    await session.execute(
+        delete(PresenceRequest).where(PresenceRequest.teacher_id == teacher_id)
+    )
+    await session.delete(teacher)
     await session.commit()

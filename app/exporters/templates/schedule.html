@@ -21,7 +21,14 @@
     td.slot { height: 25mm; padding: 1.5mm 1mm; background: #fff; }
     td.empty { background: #bbb9ba; }
     td.complete { background: #e3efd9; }
-    .course { font-size: 9.7pt; line-height: 1.2; font-weight: 700; }
+    .course {
+      font-size: 9.7pt;
+      line-height: 1.15;
+      font-weight: 700;
+      overflow-wrap: break-word;
+      word-break: break-word;
+      hyphens: auto;
+    }
     .progress { margin-top: 2mm; font-size: 8.5pt; }
     .fin { margin-top: 1.5mm; font-size: 10pt; font-weight: 700; letter-spacing: .4px; }
     .teacher { border-top: 1px solid #555; margin: 1mm -1mm -1.5mm; padding-top: .8mm; font-size: 8.5pt; }
@@ -38,7 +45,7 @@
 <body>
   <header>
     <img class="logo" src="logo-ak.png" alt="Ascencia Keyce" />
-    <h1>EMPLOI DE TEMPS</h1>
+    <h1>EMPLOI DU TEMPS</h1>
     <p class="week">Semaine {{ week_label }}</p>
     <p class="audience">{{ audience_name }}</p>
   </header>

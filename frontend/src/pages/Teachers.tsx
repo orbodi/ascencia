@@ -1,7 +1,15 @@
 import { FormEvent, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { Button, Card, Input, Modal, PageHeader, Select } from "../components/ui";
+import {
+  Button,
+  Card,
+  ConfirmDialog,
+  Input,
+  Modal,
+  PageHeader,
+  Select,
+} from "../components/ui";
 
 type Teacher = {
   id: number;
@@ -40,6 +48,8 @@ export function TeachersPage() {
   const [form, setForm] = useState(empty);
   const [channel, setChannel] = useState<"both" | "whatsapp" | "email">("both");
   const [outreachMsg, setOutreachMsg] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Teacher | null>(null);
   const { data = [], isLoading } = useQuery({
     queryKey: ["teachers"],
     queryFn: () => api<Teacher[]>("/admin/teachers"),
@@ -78,6 +88,21 @@ export function TeachersPage() {
     mutationFn: (id: number) =>
       api(`/admin/teachers/${id}`, { method: "DELETE" }),
     onSuccess: () => void qc.invalidateQueries({ queryKey: ["teachers"] }),
+  });
+
+  const remove = useMutation({
+    mutationFn: (id: number) =>
+      api(`/admin/teachers/${id}/permanent`, { method: "DELETE" }),
+    onSuccess: () => {
+      setDeleteError(null);
+      setConfirmDelete(null);
+      void qc.invalidateQueries({ queryKey: ["teachers"] });
+    },
+    onError: (err: Error) => {
+      // Le dialogue reste ouvert pour montrer l'erreur (ex. 409 : enseignant
+      // encore assigné à des cours) directement là où l'action a échoué.
+      setDeleteError(err.message || "Suppression impossible");
+    },
   });
 
   const sendForm = useMutation({
@@ -224,21 +249,6 @@ export function TeachersPage() {
                       {t.is_active ? (
                         <Button
                           variant="ghost"
-                          disabled={sendForm.isPending}
-                          onClick={() => {
-                            setOutreachMsg(null);
-                            sendForm.mutate({
-                              teacher_id: t.id,
-                              channel,
-                            });
-                          }}
-                        >
-                          Formulaire
-                        </Button>
-                      ) : null}
-                      {t.is_active ? (
-                        <Button
-                          variant="ghost"
                           onClick={() => {
                             if (
                               window.confirm(
@@ -252,6 +262,15 @@ export function TeachersPage() {
                           Archiver
                         </Button>
                       ) : null}
+                      <Button
+                        variant="ghost"
+                        onClick={() => {
+                          setDeleteError(null);
+                          setConfirmDelete(t);
+                        }}
+                      >
+                        Supprimer
+                      </Button>
                     </div>
                   </td>
                 </tr>
@@ -330,6 +349,34 @@ export function TeachersPage() {
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title="Supprimer l'enseignant"
+        message={
+          <>
+            <p>
+              Supprimer définitivement{" "}
+              <strong>{confirmDelete?.name}</strong> ? Cette action est
+              irréversible.
+            </p>
+            {deleteError ? (
+              <p className="mt-3 rounded-lg bg-warn/10 p-2 text-warn">
+                {deleteError}
+              </p>
+            ) : null}
+          </>
+        }
+        confirmLabel="Supprimer"
+        pending={remove.isPending}
+        onCancel={() => {
+          setConfirmDelete(null);
+          setDeleteError(null);
+        }}
+        onConfirm={() => {
+          if (confirmDelete) remove.mutate(confirmDelete.id);
+        }}
+      />
     </div>
   );
 }

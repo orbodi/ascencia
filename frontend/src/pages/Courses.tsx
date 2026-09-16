@@ -1,7 +1,15 @@
 import { FormEvent, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { Button, Card, Input, Modal, PageHeader, Select } from "../components/ui";
+import {
+  Button,
+  Card,
+  ConfirmDialog,
+  Input,
+  Modal,
+  PageHeader,
+  Select,
+} from "../components/ui";
 
 type Course = {
   id: number;
@@ -55,6 +63,8 @@ export function CoursesPage() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [form, setForm] = useState(empty);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<Course | null>(null);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const { data = [], isLoading } = useQuery({
     queryKey: ["courses"],
     queryFn: () => api<Course[]>("/admin/courses"),
@@ -96,7 +106,14 @@ export function CoursesPage() {
   const remove = useMutation({
     mutationFn: (id: number) =>
       api(`/admin/courses/${id}`, { method: "DELETE" }),
-    onSuccess: () => void qc.invalidateQueries({ queryKey: ["courses"] }),
+    onSuccess: () => {
+      setDeleteError(null);
+      setConfirmDelete(null);
+      void qc.invalidateQueries({ queryKey: ["courses"] });
+    },
+    onError: (err: Error) => {
+      setDeleteError(err.message || "Suppression impossible");
+    },
   });
 
   function closeModal() {
@@ -245,13 +262,8 @@ export function CoursesPage() {
                         <Button
                           variant="ghost"
                           onClick={() => {
-                            if (
-                              window.confirm(
-                                `Supprimer le cours « ${c.title} » ?`
-                              )
-                            ) {
-                              remove.mutate(c.id);
-                            }
+                            setDeleteError(null);
+                            setConfirmDelete(c);
                           }}
                         >
                           Supprimer
@@ -422,6 +434,34 @@ export function CoursesPage() {
                 </div>
               </form>
       </Modal>
+
+      <ConfirmDialog
+        open={confirmDelete !== null}
+        title="Supprimer le cours"
+        message={
+          <>
+            <p>
+              Supprimer le cours «{" "}
+              <strong>{confirmDelete?.title}</strong> » ? Cette action est
+              irréversible.
+            </p>
+            {deleteError ? (
+              <p className="mt-3 rounded-lg bg-warn/10 p-2 text-warn">
+                {deleteError}
+              </p>
+            ) : null}
+          </>
+        }
+        confirmLabel="Supprimer"
+        pending={remove.isPending}
+        onCancel={() => {
+          setConfirmDelete(null);
+          setDeleteError(null);
+        }}
+        onConfirm={() => {
+          if (confirmDelete) remove.mutate(confirmDelete.id);
+        }}
+      />
     </div>
   );
 }

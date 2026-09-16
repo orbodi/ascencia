@@ -1,7 +1,15 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
-import { Button, Card, Input, Modal, PageHeader, Select } from "../components/ui";
+import {
+  Button,
+  Card,
+  ConfirmDialog,
+  Input,
+  Modal,
+  PageHeader,
+  Select,
+} from "../components/ui";
 
 type Level = { id: number; code: string; label: string };
 
@@ -52,6 +60,8 @@ export function CurriculumPage() {
   const [draftItems, setDraftItems] = useState<WeekItem[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [confirmDeletePlan, setConfirmDeletePlan] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const { data: plans = [], isLoading } = useQuery({
     queryKey: ["curriculum-plans"],
@@ -155,7 +165,12 @@ export function CurriculumPage() {
     onSuccess: () => {
       setSelectedPlanId(null);
       setMsg("Programme supprimé");
+      setDeleteError(null);
+      setConfirmDeletePlan(false);
       void qc.invalidateQueries({ queryKey: ["curriculum-plans"] });
+    },
+    onError: (err: Error) => {
+      setDeleteError(err.message || "Suppression impossible");
     },
   });
 
@@ -288,13 +303,8 @@ export function CurriculumPage() {
                 <Button
                   variant="ghost"
                   onClick={() => {
-                    if (
-                      window.confirm(
-                        "Supprimer ce programme et toutes ses semaines ?"
-                      )
-                    ) {
-                      removePlan.mutate(selected.id);
-                    }
+                    setDeleteError(null);
+                    setConfirmDeletePlan(true);
                   }}
                 >
                   Supprimer
@@ -541,6 +551,38 @@ export function CurriculumPage() {
                 </div>
               </form>
       </Modal>
+
+      <ConfirmDialog
+        open={confirmDeletePlan}
+        title="Supprimer le programme"
+        message={
+          <>
+            <p>
+              Supprimer le programme{" "}
+              <strong>
+                {selected?.academic_level_label ||
+                  selected?.academic_level_code}{" "}
+                · Semestre {selected?.semester}
+              </strong>{" "}
+              et toutes ses semaines ? Cette action est irréversible.
+            </p>
+            {deleteError ? (
+              <p className="mt-3 rounded-lg bg-warn/10 p-2 text-warn">
+                {deleteError}
+              </p>
+            ) : null}
+          </>
+        }
+        confirmLabel="Supprimer"
+        pending={removePlan.isPending}
+        onCancel={() => {
+          setConfirmDeletePlan(false);
+          setDeleteError(null);
+        }}
+        onConfirm={() => {
+          if (selected) removePlan.mutate(selected.id);
+        }}
+      />
     </div>
   );
 }
