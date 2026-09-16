@@ -40,6 +40,15 @@ const entryEmpty = {
   entry_date: "",
 };
 
+const slotEmpty = {
+  day_of_week: 0,
+  start_time: "08:00",
+  end_time: "10:00",
+  label: "",
+};
+
+const DAY_LABELS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
+
 function mondayOf(d: Date): Date {
   const x = new Date(d);
   const day = (x.getDay() + 6) % 7;
@@ -152,9 +161,14 @@ export function SchedulePage() {
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState(entryEmpty);
   const [localError, setLocalError] = useState<string | null>(null);
+  const [entryActionError, setEntryActionError] = useState<string | null>(null);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewName, setPreviewName] = useState<string | null>(null);
+  const [slotsOpen, setSlotsOpen] = useState(false);
+  const [slotForm, setSlotForm] = useState(slotEmpty);
+  const [editingSlotId, setEditingSlotId] = useState<number | null>(null);
+  const [slotError, setSlotError] = useState<string | null>(null);
 
   const weekParam = fmt(weekStart);
   const { data = [], isLoading, error, refetch } = useQuery({
@@ -174,7 +188,7 @@ export function SchedulePage() {
   const { data: timeslots = [] } = useQuery({
     queryKey: ["timeslots"],
     queryFn: () => api<TimeSlot[]>("/admin/timeslots"),
-    enabled: createOpen,
+    enabled: createOpen || slotsOpen,
   });
 
   useEffect(() => {
@@ -217,7 +231,72 @@ export function SchedulePage() {
       setSelected(null);
       void qc.invalidateQueries({ queryKey: ["schedule"] });
     },
+    onError: (err: unknown) => setEntryActionError(formatApiError(err)),
   });
+
+  const deleteEntry = useMutation({
+    mutationFn: (id: number) =>
+      api(`/admin/schedule/${id}`, { method: "DELETE" }),
+    onSuccess: () => {
+      setSelected(null);
+      void qc.invalidateQueries({ queryKey: ["schedule"] });
+    },
+    onError: (err: unknown) => setEntryActionError(formatApiError(err)),
+  });
+
+  const saveSlot = useMutation({
+    mutationFn: () =>
+      api(
+        editingSlotId ? `/admin/timeslots/${editingSlotId}` : "/admin/timeslots",
+        {
+          method: editingSlotId ? "PATCH" : "POST",
+          body: JSON.stringify(slotForm),
+        }
+      ),
+    onSuccess: () => {
+      setSlotForm(slotEmpty);
+      setEditingSlotId(null);
+      setSlotError(null);
+      void qc.invalidateQueries({ queryKey: ["timeslots"] });
+    },
+    onError: (err: unknown) => setSlotError(formatApiError(err)),
+  });
+
+  const removeSlot = useMutation({
+    mutationFn: (id: number) =>
+      api(`/admin/timeslots/${id}`, { method: "DELETE" }),
+    onSuccess: (_data, id) => {
+      if (editingSlotId === id) {
+        setEditingSlotId(null);
+        setSlotForm(slotEmpty);
+      }
+      setSlotError(null);
+      void qc.invalidateQueries({ queryKey: ["timeslots"] });
+    },
+    onError: (err: unknown) => setSlotError(formatApiError(err)),
+  });
+
+  function closeSlotsModal() {
+    setSlotsOpen(false);
+    setEditingSlotId(null);
+    setSlotForm(slotEmpty);
+    setSlotError(null);
+    saveSlot.reset();
+  }
+
+  function onSlotSubmit(e: FormEvent) {
+    e.preventDefault();
+    setSlotError(null);
+    if (!slotForm.label.trim()) {
+      setSlotError("Le libellé est obligatoire");
+      return;
+    }
+    if (slotForm.end_time <= slotForm.start_time) {
+      setSlotError("L'heure de fin doit être postérieure à l'heure de début");
+      return;
+    }
+    saveSlot.mutate();
+  }
 
   const exportPdf = useMutation({
     mutationFn: () => downloadWeekPdf(weekParam),
@@ -312,6 +391,9 @@ export function SchedulePage() {
         actions={
           <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:flex-wrap">
             <Button onClick={() => openCreate()}>Ajouter</Button>
+            <Button variant="ghost" onClick={() => setSlotsOpen(true)}>
+              Créneaux
+            </Button>
             <Button
               variant="ghost"
               onClick={() => previewPdf.mutate()}
@@ -418,7 +500,10 @@ export function SchedulePage() {
                     entries.map((e) => (
                       <button
                         key={e.id}
-                        onClick={() => setSelected(e)}
+                        onClick={() => {
+                          setEntryActionError(null);
+                          setSelected(e);
+                        }}
                         className={`w-full min-h-11 rounded-xl border px-3 py-2.5 text-left text-xs transition hover:-translate-y-0.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-blue ${
                           STATUS_COLOR[e.status] || STATUS_COLOR.scheduled
                         }`}
@@ -442,7 +527,10 @@ export function SchedulePage() {
 
       <Modal
         open={!!selected}
-        onClose={() => setSelected(null)}
+        onClose={() => {
+          setSelected(null);
+          setEntryActionError(null);
+        }}
         title={selected ? `Séance #${selected.id}` : "Séance"}
         titleId="schedule-detail-title"
       >
@@ -478,14 +566,24 @@ export function SchedulePage() {
                   <dd>{STATUS_LABEL[selected.status] || selected.status}</dd>
                 </div>
               </dl>
-              <div className="flex justify-end gap-2">
-                <Button variant="ghost" onClick={() => setSelected(null)}>
+              {entryActionError ? (
+                <p className="mb-3 text-sm text-warn">{entryActionError}</p>
+              ) : null}
+              <div className="flex flex-wrap justify-end gap-2">
+                <Button
+                  variant="ghost"
+                  onClick={() => {
+                    setSelected(null);
+                    setEntryActionError(null);
+                  }}
+                >
                   Fermer
                 </Button>
                 {selected.status === "scheduled" ? (
                   <Button
                     variant="danger"
                     onClick={() => {
+                      setEntryActionError(null);
                       if (
                         window.confirm(
                           `Annuler la séance « ${selected.course_title} » ?`
@@ -498,6 +596,22 @@ export function SchedulePage() {
                     Annuler la séance
                   </Button>
                 ) : null}
+                <Button
+                  variant="danger"
+                  disabled={deleteEntry.isPending}
+                  onClick={() => {
+                    setEntryActionError(null);
+                    if (
+                      window.confirm(
+                        `Supprimer définitivement la séance « ${selected.course_title} » ? Cette action est irréversible (contrairement à l'annulation, la séance ne sera plus conservée dans l'historique).`
+                      )
+                    ) {
+                      deleteEntry.mutate(selected.id);
+                    }
+                  }}
+                >
+                  {deleteEntry.isPending ? "Suppression…" : "Supprimer"}
+                </Button>
               </div>
                 </>
               ) : null}
@@ -596,6 +710,166 @@ export function SchedulePage() {
                   </Button>
                 </div>
               </form>
+      </Modal>
+
+      <Modal
+        open={slotsOpen}
+        onClose={closeSlotsModal}
+        title="Créneaux horaires"
+        titleId="timeslots-title"
+        wide
+      >
+        <div className="grid gap-5 sm:grid-cols-[260px_1fr]">
+          <form className="space-y-3" onSubmit={onSlotSubmit}>
+            <h4 className="text-sm font-semibold">
+              {editingSlotId ? "Modifier le créneau" : "Nouveau créneau"}
+            </h4>
+            <Select
+              label="Jour"
+              value={slotForm.day_of_week}
+              onChange={(e) =>
+                setSlotForm({ ...slotForm, day_of_week: Number(e.target.value) })
+              }
+            >
+              {DAY_LABELS.map((label, idx) => (
+                <option key={idx} value={idx}>
+                  {label}
+                </option>
+              ))}
+            </Select>
+            <div className="grid grid-cols-2 gap-3">
+              <Input
+                label="Début"
+                type="time"
+                value={slotForm.start_time}
+                onChange={(e) =>
+                  setSlotForm({ ...slotForm, start_time: e.target.value })
+                }
+                required
+              />
+              <Input
+                label="Fin"
+                type="time"
+                value={slotForm.end_time}
+                onChange={(e) =>
+                  setSlotForm({ ...slotForm, end_time: e.target.value })
+                }
+                required
+              />
+            </div>
+            <Input
+              label="Libellé"
+              placeholder="Mardi 08h-10h"
+              value={slotForm.label}
+              onChange={(e) => setSlotForm({ ...slotForm, label: e.target.value })}
+              required
+            />
+            {slotError ? (
+              <p className="text-sm text-warn">{slotError}</p>
+            ) : null}
+            <div className="flex gap-2">
+              <Button
+                className="flex-1"
+                type="submit"
+                disabled={saveSlot.isPending}
+              >
+                {saveSlot.isPending
+                  ? "Enregistrement…"
+                  : editingSlotId
+                    ? "Enregistrer"
+                    : "Ajouter"}
+              </Button>
+              {editingSlotId ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => {
+                    setEditingSlotId(null);
+                    setSlotForm(slotEmpty);
+                    setSlotError(null);
+                  }}
+                >
+                  Annuler
+                </Button>
+              ) : null}
+            </div>
+          </form>
+          <div className="max-h-96 overflow-y-auto rounded-xl border border-line">
+            <table className="w-full text-sm">
+              <thead className="bg-mist text-left">
+                <tr>
+                  <th className="px-3 py-2">Jour</th>
+                  <th className="px-3 py-2">Horaire</th>
+                  <th className="px-3 py-2">Libellé</th>
+                  <th className="px-3 py-2"></th>
+                </tr>
+              </thead>
+              <tbody>
+                {timeslots.length === 0 ? (
+                  <tr>
+                    <td className="px-3 py-3 text-ink-soft" colSpan={4}>
+                      Aucun créneau.
+                    </td>
+                  </tr>
+                ) : (
+                  timeslots
+                    .slice()
+                    .sort(
+                      (a, b) =>
+                        a.day_of_week - b.day_of_week ||
+                        a.start_time.localeCompare(b.start_time)
+                    )
+                    .map((s) => (
+                      <tr key={s.id} className="border-t border-line">
+                        <td className="px-3 py-2">
+                          {DAY_LABELS[s.day_of_week] ?? s.day_of_week}
+                        </td>
+                        <td className="px-3 py-2">
+                          {s.start_time}–{s.end_time}
+                        </td>
+                        <td className="px-3 py-2">{s.label}</td>
+                        <td className="px-3 py-2 text-right">
+                          <div className="flex justify-end gap-1.5">
+                            <Button
+                              variant="ghost"
+                              onClick={() => {
+                                setEditingSlotId(s.id);
+                                setSlotForm({
+                                  day_of_week: s.day_of_week,
+                                  start_time: s.start_time,
+                                  end_time: s.end_time,
+                                  label: s.label,
+                                });
+                                setSlotError(null);
+                              }}
+                            >
+                              Modifier
+                            </Button>
+                            <Button
+                              variant="ghost"
+                              disabled={removeSlot.isPending}
+                              onClick={() => {
+                                setSlotError(null);
+                                if (
+                                  window.confirm(
+                                    `Supprimer le créneau « ${s.label} » ?`
+                                  )
+                                ) {
+                                  removeSlot.mutate(s.id);
+                                }
+                              }}
+                            >
+                              Supprimer
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
       </Modal>
 
       {previewUrl ? (
