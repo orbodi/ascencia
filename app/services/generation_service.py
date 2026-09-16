@@ -22,6 +22,8 @@ from app.domain.models import (
     TimeSlot,
 )
 from app.config import settings
+from app.services.academic_calendar import academic_week_number
+from app.services.curriculum_service import CurriculumService
 from app.services.planning_rules import (
     BlockingAvailability,
     CandidateCheck,
@@ -43,11 +45,15 @@ class ScheduleGenerationService:
     ) -> SchedulePublication:
         monday = week_start - timedelta(days=week_start.weekday())
         sunday = monday + timedelta(days=6)
+        week_number = academic_week_number(monday)
 
         courses = (
             await self.session.execute(
                 select(Course)
-                .options(selectinload(Course.teacher), selectinload(Course.group))
+                .options(
+                    selectinload(Course.teacher),
+                    selectinload(Course.group),
+                )
                 .order_by(Course.priority.desc(), Course.id)
             )
         ).scalars().all()
@@ -113,11 +119,17 @@ class ScheduleGenerationService:
             for entry in week_entries
             if entry.status == ScheduleEntryStatus.scheduled
         ]
-        courses_already_in_week = {
+        sessions_in_week: Counter[int] = Counter(
             entry.course_id
             for entry in week_entries
             if entry.status == ScheduleEntryStatus.scheduled
-        }
+        )
+
+        (
+            intentions,
+            levels_under_plan,
+            curriculum_warnings,
+        ) = await CurriculumService(self.session).intentions_for_week(week_number)
 
         blocks = [
             BlockingAvailability(
@@ -157,134 +169,210 @@ class ScheduleGenerationService:
         group_day_minutes: Counter[tuple[int, date]] = Counter()
         for entry in week_entries:
             if entry.status == ScheduleEntryStatus.scheduled:
-                group_day_minutes[(entry.course.group_id, entry.entry_date)] += entry.course.duration_minutes
+                group_day_minutes[(entry.course.group_id, entry.entry_date)] += (
+                    entry.course.duration_minutes
+                )
 
         generated: list[dict[str, Any]] = []
         unscheduled: list[dict[str, Any]] = []
         skipped_complete = 0
-        skipped_existing = 0
+        skipped_not_in_plan = 0
+        curriculum_mode_used = bool(levels_under_plan)
+
+        def sessions_needed_for(course: Course) -> int | None:
+            """None = skip (not in plan); 0+ = place that many this week."""
+            level_id = course.group.academic_level_id if course.group else None
+            if level_id is not None and level_id in levels_under_plan:
+                return intentions.get(course.id, 0)
+            # Fallback volume: one session if volume incomplete
+            completed = scheduled_counts.get(course.id, 0) * course.duration_minutes
+            if completed >= course.planned_minutes:
+                return None  # signal complete via separate path
+            return 1
 
         for course in courses:
-            completed_minutes = scheduled_counts.get(course.id, 0) * course.duration_minutes
-            if completed_minutes >= course.planned_minutes:
+            completed_minutes = (
+                scheduled_counts.get(course.id, 0) * course.duration_minutes
+            )
+            level_id = course.group.academic_level_id if course.group else None
+            under_plan = level_id is not None and level_id in levels_under_plan
+
+            if not under_plan and completed_minutes >= course.planned_minutes:
                 skipped_complete += 1
                 continue
-            if course.prerequisite_course_id:
-                prerequisite = course_by_id.get(course.prerequisite_course_id)
-                prerequisite_done = scheduled_counts.get(course.prerequisite_course_id, 0) * (
-                    prerequisite.duration_minutes if prerequisite else 0
-                )
-                if prerequisite is None or prerequisite_done < prerequisite.planned_minutes:
-                    unscheduled.append({
-                        "course_id": course.id,
-                        "course_title": course.title,
-                        "reason": "Le prérequis pédagogique n'est pas encore achevé.",
-                    })
-                    continue
-            if course.id in courses_already_in_week:
-                skipped_existing += 1
+
+            needed = sessions_needed_for(course)
+            if needed is None:
+                skipped_complete += 1
+                continue
+            if needed == 0:
+                skipped_not_in_plan += 1
                 continue
 
-            candidates: list[tuple[int, date, TimeSlot, Room]] = []
-            for slot in slots:
-                target_date = monday + timedelta(days=slot.day_of_week)
-                if target_date > sunday:
+            if course.prerequisite_course_id:
+                prerequisite = course_by_id.get(course.prerequisite_course_id)
+                prerequisite_done = scheduled_counts.get(
+                    course.prerequisite_course_id, 0
+                ) * (prerequisite.duration_minutes if prerequisite else 0)
+                if (
+                    prerequisite is None
+                    or prerequisite_done < prerequisite.planned_minutes
+                ):
+                    unscheduled.append(
+                        {
+                            "course_id": course.id,
+                            "course_title": course.title,
+                            "reason": "Le prérequis pédagogique n'est pas encore achevé.",
+                            "sessions_requested": needed,
+                        }
+                    )
                     continue
-                slot_minutes = (
-                    slot.end_time.hour * 60
-                    + slot.end_time.minute
-                    - slot.start_time.hour * 60
-                    - slot.start_time.minute
-                )
-                if course.duration_minutes > slot_minutes:
-                    continue
-                if group_day_minutes[(course.group_id, target_date)] + course.duration_minutes > settings.max_group_daily_minutes:
-                    continue
-                for room in rooms:
-                    if (target_date, slot.id, room.id) in reserved_room_slots:
+
+            remaining = max(0, needed - sessions_in_week[course.id])
+            if remaining == 0:
+                continue
+
+            placed = 0
+            for _ in range(remaining):
+                candidates: list[tuple[int, date, TimeSlot, Room]] = []
+                for slot in slots:
+                    target_date = monday + timedelta(days=slot.day_of_week)
+                    if target_date > sunday:
                         continue
-                    candidate = CandidateCheck(
+                    slot_minutes = (
+                        slot.end_time.hour * 60
+                        + slot.end_time.minute
+                        - slot.start_time.hour * 60
+                        - slot.start_time.minute
+                    )
+                    if course.duration_minutes > slot_minutes:
+                        continue
+                    if (
+                        group_day_minutes[(course.group_id, target_date)]
+                        + course.duration_minutes
+                        > settings.max_group_daily_minutes
+                    ):
+                        continue
+                    for room in rooms:
+                        if (target_date, slot.id, room.id) in reserved_room_slots:
+                            continue
+                        candidate = CandidateCheck(
+                            teacher_id=course.teacher_id,
+                            group_id=course.group_id,
+                            room_id=room.id,
+                            room_capacity=room.capacity,
+                            student_count=course.group.student_count,
+                            window=SlotWindow(
+                                target_date, slot.start_time, slot.end_time
+                            ),
+                        )
+                        if detect_conflicts(candidate, occupied, blocks):
+                            continue
+                        score = (
+                            day_load[target_date] * 100
+                            + teacher_day_load[(course.teacher_id, target_date)] * 60
+                            + group_day_load[(course.group_id, target_date)] * 60
+                            + max(room.capacity - course.group.student_count, 0)
+                            + slot.start_time.hour
+                        )
+                        candidates.append((score, target_date, slot, room))
+
+                if not candidates:
+                    break
+
+                _, target_date, slot, room = min(
+                    candidates,
+                    key=lambda item: (
+                        item[0],
+                        item[1],
+                        item[2].start_time,
+                        item[3].name,
+                    ),
+                )
+                draft_id = -len(generated) - 1
+                occupied.append(
+                    OccupiedEntry(
+                        entry_id=draft_id,
                         teacher_id=course.teacher_id,
                         group_id=course.group_id,
                         room_id=room.id,
-                        room_capacity=room.capacity,
-                        student_count=course.group.student_count,
-                        window=SlotWindow(target_date, slot.start_time, slot.end_time),
+                        window=SlotWindow(
+                            target_date, slot.start_time, slot.end_time
+                        ),
+                        status="draft",
                     )
-                    if detect_conflicts(candidate, occupied, blocks):
-                        continue
-                    score = (
-                        day_load[target_date] * 100
-                        + teacher_day_load[(course.teacher_id, target_date)] * 60
-                        + group_day_load[(course.group_id, target_date)] * 60
-                        + max(room.capacity - course.group.student_count, 0)
-                        + slot.start_time.hour
-                    )
-                    candidates.append((score, target_date, slot, room))
-
-            if not candidates:
-                unscheduled.append({
-                    "course_id": course.id,
-                    "course_title": course.title,
-                    "reason": "Aucun créneau compatible avec les contraintes actuelles.",
-                })
-                continue
-
-            _, target_date, slot, room = min(
-                candidates,
-                key=lambda item: (item[0], item[1], item[2].start_time, item[3].name),
-            )
-            draft_id = -len(generated) - 1
-            occupied.append(
-                OccupiedEntry(
-                    entry_id=draft_id,
-                    teacher_id=course.teacher_id,
-                    group_id=course.group_id,
-                    room_id=room.id,
-                    window=SlotWindow(target_date, slot.start_time, slot.end_time),
-                    status="draft",
                 )
-            )
-            reserved_room_slots.add((target_date, slot.id, room.id))
-            day_load[target_date] += 1
-            teacher_day_load[(course.teacher_id, target_date)] += 1
-            group_day_load[(course.group_id, target_date)] += 1
-            group_day_minutes[(course.group_id, target_date)] += course.duration_minutes
-            generated.append({
-                "course_id": course.id,
-                "course_title": course.title,
-                "teacher_id": course.teacher_id,
-                "teacher_name": course.teacher.name,
-                "group_id": course.group_id,
-                "group_name": course.group.name,
-                "room_id": room.id,
-                "room_name": room.name,
-                "timeslot_id": slot.id,
-                "timeslot_label": slot.label,
-                "entry_date": target_date.isoformat(),
-                "is_new": True,
-            })
+                reserved_room_slots.add((target_date, slot.id, room.id))
+                day_load[target_date] += 1
+                teacher_day_load[(course.teacher_id, target_date)] += 1
+                group_day_load[(course.group_id, target_date)] += 1
+                group_day_minutes[(course.group_id, target_date)] += (
+                    course.duration_minutes
+                )
+                sessions_in_week[course.id] += 1
+                placed += 1
+                generated.append(
+                    {
+                        "course_id": course.id,
+                        "course_title": course.title,
+                        "teacher_id": course.teacher_id,
+                        "teacher_name": course.teacher.name,
+                        "group_id": course.group_id,
+                        "group_name": course.group.name,
+                        "room_id": room.id,
+                        "room_name": room.name,
+                        "timeslot_id": slot.id,
+                        "timeslot_label": slot.label,
+                        "entry_date": target_date.isoformat(),
+                        "is_new": True,
+                    }
+                )
+
+            if placed < remaining:
+                unscheduled.append(
+                    {
+                        "course_id": course.id,
+                        "course_title": course.title,
+                        "reason": "Aucun créneau compatible avec les contraintes actuelles.",
+                        "sessions_requested": needed,
+                        "sessions_placed": placed + (needed - remaining),
+                        "sessions_missing": remaining - placed,
+                    }
+                )
 
         sequence = (
             await self.session.scalar(
-                select(func.count()).select_from(SchedulePublication).where(
-                    SchedulePublication.week_start == monday
-                )
+                select(func.count())
+                .select_from(SchedulePublication)
+                .where(SchedulePublication.week_start == monday)
             )
             or 0
         ) + 1
         version = f"EDT-{monday.strftime('%Y%m%d')}-V{sequence}"
+        notice = (
+            "Brouillon calculé par règles déterministes et score d'équilibrage. "
+            "Une validation humaine reste obligatoire."
+        )
+        if curriculum_mode_used:
+            notice = (
+                f"Programme pédagogique actif (semaine académique {week_number}). "
+                + notice
+            )
+        elif curriculum_warnings:
+            notice = "Fallback volume (hors horizon programme). " + notice
+
         report = {
             "engine": "heuristic-constraints-v1",
+            "academic_week_number": week_number,
+            "curriculum_mode": curriculum_mode_used,
+            "curriculum_warnings": curriculum_warnings,
+            "intentions": intentions,
             "generated_count": len(generated),
             "unscheduled_count": len(unscheduled),
             "skipped_complete_count": skipped_complete,
-            "skipped_existing_count": skipped_existing,
+            "skipped_not_in_plan_count": skipped_not_in_plan,
             "unscheduled": unscheduled,
-            "notice": (
-                "Brouillon calculé par règles déterministes et score d'équilibrage. "
-                "Une validation humaine reste obligatoire."
-            ),
+            "notice": notice,
         }
         publication = SchedulePublication(
             version_number=version,
@@ -294,7 +382,9 @@ class ScheduleGenerationService:
             snapshot_json=sorted(
                 existing_snapshot + generated,
                 key=lambda item: (
-                    item["entry_date"], item["timeslot_id"], item["group_name"]
+                    item["entry_date"],
+                    item["timeslot_id"],
+                    item["group_name"],
                 ),
             ),
             generation_report=report,
@@ -304,7 +394,11 @@ class ScheduleGenerationService:
         self.session.add(
             AuditLog(
                 action="schedule_draft_generated",
-                payload={"version": version, "week_start": monday.isoformat(), **report},
+                payload={
+                    "version": version,
+                    "week_start": monday.isoformat(),
+                    **report,
+                },
             )
         )
         await self.session.commit()

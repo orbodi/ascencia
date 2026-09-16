@@ -19,6 +19,7 @@ const sections = [
     title: "Référentiel",
     links: [
       { to: "/levels", label: "Niveaux / Parcours", icon: "levels" },
+      { to: "/curriculum", label: "Programme", icon: "curriculum" },
       { to: "/teachers", label: "Enseignants", icon: "teachers" },
       { to: "/groups", label: "Groupes", icon: "groups" },
       { to: "/rooms", label: "Salles", icon: "rooms" },

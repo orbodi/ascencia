@@ -23,6 +23,8 @@ from app.domain.models import (
     AdminUser,
     AuditLog,
     Course,
+    CurriculumPlan,
+    CurriculumWeekItem,
     Room,
     ScheduleEntry,
     ScheduleEntryStatus,
@@ -46,6 +48,8 @@ TABLES = [
     "schedule_changes",
     "availabilities",
     "schedule_entries",
+    "curriculum_week_items",
+    "curriculum_plans",
     "courses",
     "time_slots",
     "rooms",
@@ -283,6 +287,42 @@ async def seed(reset: bool = False) -> None:
         ]
         session.add_all(courses)
         await session.flush()
+
+        curriculum = CurriculumPlan(
+            academic_level_id=levels[0].id,
+            semester=1,
+            week_count=6,
+        )
+        session.add(curriculum)
+        await session.flush()
+        session.add_all(
+            [
+                CurriculumWeekItem(
+                    plan_id=curriculum.id,
+                    week_index=1,
+                    course_id=courses[0].id,
+                    sessions_count=1,
+                ),
+                CurriculumWeekItem(
+                    plan_id=curriculum.id,
+                    week_index=1,
+                    course_id=courses[1].id,
+                    sessions_count=1,
+                ),
+                CurriculumWeekItem(
+                    plan_id=curriculum.id,
+                    week_index=2,
+                    course_id=courses[0].id,
+                    sessions_count=1,
+                ),
+                CurriculumWeekItem(
+                    plan_id=curriculum.id,
+                    week_index=2,
+                    course_id=courses[5].id,
+                    sessions_count=1,
+                ),
+            ]
+        )
 
         slot_by_key = {(s.day_of_week, s.start_time): s for s in slots}
         plan = [

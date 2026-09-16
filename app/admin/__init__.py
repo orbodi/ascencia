@@ -7,6 +7,7 @@ from app.admin.routes import (
     chat,
     config_routes,
     courses,
+    curriculum,
     dashboard,
     groups,
     history_admin,
@@ -25,6 +26,7 @@ admin_router.include_router(autonomy.router)
 admin_router.include_router(auth_routes.router)
 admin_router.include_router(dashboard.router)
 admin_router.include_router(levels.router)
+admin_router.include_router(curriculum.router)
 admin_router.include_router(publications.router)
 admin_router.include_router(presence_campaigns.router)
 admin_router.include_router(outreach.router)

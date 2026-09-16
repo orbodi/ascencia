@@ -80,6 +80,9 @@ class AcademicLevel(Base):
     speciality: Mapped[Optional[str]] = mapped_column(String(120))
 
     groups: Mapped[list[StudentGroup]] = relationship(back_populates="academic_level")
+    curriculum_plans: Mapped[list[CurriculumPlan]] = relationship(
+        back_populates="academic_level"
+    )
 
 
 class AdminUser(Base):
@@ -210,6 +213,71 @@ class Course(Base):
     prerequisite: Mapped[Optional[Course]] = relationship(
         remote_side="Course.id", foreign_keys=[prerequisite_course_id]
     )
+    curriculum_items: Mapped[list[CurriculumWeekItem]] = relationship(
+        back_populates="course"
+    )
+
+
+class CurriculumPlan(Base):
+    """Programme pédagogique multi-semaines pour un parcours / semestre."""
+
+    __tablename__ = "curriculum_plans"
+    __table_args__ = (
+        UniqueConstraint(
+            "academic_level_id",
+            "semester",
+            name="uq_curriculum_plan_level_semester",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    academic_level_id: Mapped[int] = mapped_column(
+        ForeignKey("academic_levels.id"), nullable=False
+    )
+    semester: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+    week_count: Mapped[int] = mapped_column(Integer, default=6, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=func.now(),
+        nullable=False,
+    )
+
+    academic_level: Mapped[AcademicLevel] = relationship(
+        back_populates="curriculum_plans"
+    )
+    items: Mapped[list[CurriculumWeekItem]] = relationship(
+        back_populates="plan",
+        cascade="all, delete-orphan",
+    )
+
+
+class CurriculumWeekItem(Base):
+    """Intention de placement : cours × nb de séances pour une semaine académique."""
+
+    __tablename__ = "curriculum_week_items"
+    __table_args__ = (
+        UniqueConstraint(
+            "plan_id",
+            "week_index",
+            "course_id",
+            name="uq_curriculum_week_course",
+        ),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    plan_id: Mapped[int] = mapped_column(
+        ForeignKey("curriculum_plans.id", ondelete="CASCADE"), nullable=False
+    )
+    week_index: Mapped[int] = mapped_column(Integer, nullable=False)
+    course_id: Mapped[int] = mapped_column(ForeignKey("courses.id"), nullable=False)
+    sessions_count: Mapped[int] = mapped_column(Integer, default=1, nullable=False)
+
+    plan: Mapped[CurriculumPlan] = relationship(back_populates="items")
+    course: Mapped[Course] = relationship(back_populates="curriculum_items")
 
 
 class ScheduleEntry(Base):

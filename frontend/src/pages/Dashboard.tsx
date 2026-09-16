@@ -34,6 +34,17 @@ type PlanningCycle = {
   can_run_collection: boolean;
   can_run_publication: boolean;
   message?: string;
+  curriculum?: {
+    academic_week_number: number | null;
+    plans_count: number;
+    warnings: string[];
+    coverage: {
+      code: string;
+      has_plan: boolean;
+      week_covered: boolean;
+      intentions_count: number;
+    }[];
+  };
 };
 
 const PHASE_LABEL: Record<string, string> = {
@@ -290,6 +301,26 @@ export function DashboardPage() {
                   </span>
                 </div>
                 <div className="flex justify-between gap-3">
+                  <span className="text-ink-soft">Semaine académique</span>
+                  <span>
+                    {cycle?.curriculum?.academic_week_number != null
+                      ? `S${cycle.curriculum.academic_week_number}`
+                      : "—"}
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
+                  <span className="text-ink-soft">Programmes</span>
+                  <span>
+                    {cycle?.curriculum?.plans_count ?? 0}{" "}
+                    <Link
+                      to="/curriculum"
+                      className="ml-1 font-semibold text-accent underline"
+                    >
+                      gérer
+                    </Link>
+                  </span>
+                </div>
+                <div className="flex justify-between gap-3">
                   <span className="text-ink-soft">Collecte WhatsApp</span>
                   <span>
                     {cycle?.collection_sent_at
@@ -305,6 +336,13 @@ export function DashboardPage() {
                       : "en attente"}
                   </span>
                 </div>
+                {cycle?.curriculum?.warnings?.length ? (
+                  <div className="rounded-xl border border-warn/30 bg-warn/5 p-3 text-xs text-ink">
+                    {cycle.curriculum.warnings.map((w) => (
+                      <div key={w}>{w}</div>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </Card>
 

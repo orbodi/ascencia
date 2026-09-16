@@ -21,7 +21,9 @@ from app.domain.models import (
     Teacher,
 )
 from app.exporters import PdfExporter
+from app.services.academic_calendar import academic_week_number
 from app.services.availability_outreach import AvailabilityOutreachService
+from app.services.curriculum_service import CurriculumService
 from app.services.generation_service import ScheduleGenerationService
 from app.services.system_config import get_config_value
 from app.whatsapp import WhatsAppClient
@@ -71,6 +73,7 @@ class PlanningCycleService:
         )
         responses = await self._availability_teacher_count()
         active_count = await self._active_teacher_count()
+        curriculum = await self._curriculum_status(target_week)
         return {
             "ok": True,
             "today": today.isoformat(),
@@ -99,6 +102,7 @@ class PlanningCycleService:
                 and today >= publication_date
                 and not publication_sent_at
             ),
+            "curriculum": curriculum,
         }
 
     async def update_dates(
@@ -313,6 +317,69 @@ class PlanningCycleService:
             ],
             "admin_recipients": admin_phones,
             "deliveries": deliveries,
+        }
+
+    async def _curriculum_status(
+        self, target_week: date | None
+    ) -> dict[str, Any]:
+        plans = await CurriculumService(self.session).list_plans()
+        week_number = (
+            academic_week_number(target_week) if target_week is not None else None
+        )
+        levels = (
+            await self.session.execute(select(AcademicLevel).order_by(AcademicLevel.code))
+        ).scalars().all()
+        plans_by_level = {p.academic_level_id: p for p in plans}
+        coverage: list[dict[str, Any]] = []
+        warnings: list[str] = []
+        for level in levels:
+            plan = plans_by_level.get(level.id)
+            if plan is None:
+                warnings.append(f"Pas de programme pour {level.code}")
+                coverage.append(
+                    {
+                        "academic_level_id": level.id,
+                        "code": level.code,
+                        "has_plan": False,
+                        "week_covered": False,
+                        "intentions_count": 0,
+                    }
+                )
+                continue
+            covered = week_number is not None and week_number <= plan.week_count
+            intentions = 0
+            if week_number is not None and covered:
+                intentions = sum(
+                    item.sessions_count
+                    for item in plan.items
+                    if item.week_index == week_number
+                )
+                if intentions == 0:
+                    warnings.append(
+                        f"{level.code} : semaine {week_number} sans intention de cours"
+                    )
+            elif week_number is not None and not covered:
+                warnings.append(
+                    f"{level.code} : semaine {week_number} hors horizon "
+                    f"({plan.week_count} sem.) — fallback volume"
+                )
+            coverage.append(
+                {
+                    "academic_level_id": level.id,
+                    "code": level.code,
+                    "has_plan": True,
+                    "plan_id": plan.id,
+                    "week_count": plan.week_count,
+                    "semester": plan.semester,
+                    "week_covered": covered,
+                    "intentions_count": intentions,
+                }
+            )
+        return {
+            "academic_week_number": week_number,
+            "plans_count": len(plans),
+            "coverage": coverage,
+            "warnings": warnings,
         }
 
     async def _latest_publication(

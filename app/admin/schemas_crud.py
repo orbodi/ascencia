@@ -167,6 +167,50 @@ class ConfigUpdate(BaseModel):
     value: str
 
 
+class CurriculumPlanCreate(BaseModel):
+    academic_level_id: int = Field(gt=0)
+    semester: int = Field(default=1, ge=1, le=2)
+    week_count: int = Field(default=6, ge=1, le=52)
+
+
+class CurriculumPlanUpdate(BaseModel):
+    semester: int | None = Field(default=None, ge=1, le=2)
+    week_count: int | None = Field(default=None, ge=1, le=52)
+
+
+class CurriculumWeekItemIn(BaseModel):
+    course_id: int = Field(gt=0)
+    sessions_count: int = Field(default=1, ge=1, le=20)
+
+
+class CurriculumWeekReplace(BaseModel):
+    items: list[CurriculumWeekItemIn] = Field(default_factory=list)
+
+
+class CurriculumWeekItemOut(BaseModel):
+    id: int
+    course_id: int
+    course_title: str | None = None
+    sessions_count: int
+    duration_minutes: int | None = None
+
+
+class CurriculumWeekOut(BaseModel):
+    week_index: int
+    items: list[CurriculumWeekItemOut]
+
+
+class CurriculumPlanOut(BaseModel):
+    id: int
+    academic_level_id: int
+    academic_level_code: str | None = None
+    academic_level_label: str | None = None
+    semester: int
+    week_count: int
+    weeks: list[CurriculumWeekOut]
+    volume_warnings: list[str] = Field(default_factory=list)
+
+
 class DashboardOut(BaseModel):
     teachers_count: int
     active_teachers_count: int

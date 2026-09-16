@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from app.config import settings
+from app.services.academic_calendar import academic_week_number as _academic_week_number
 from app.domain.models import (
     AcademicLevel,
     Course,
@@ -543,12 +544,7 @@ class PdfExporter:
 
     @staticmethod
     def _academic_week_number(monday: date) -> int:
-        semester_start = settings.semester_start_date
-        if semester_start is None:
-            return monday.isocalendar().week
-        start_monday = semester_start - timedelta(days=semester_start.weekday())
-        weeks = ((monday - start_monday).days // 7) + 1
-        return max(1, weeks)
+        return _academic_week_number(monday)
 
     @staticmethod
     def _resolve_semester(entries: list[dict[str, Any]]) -> int:

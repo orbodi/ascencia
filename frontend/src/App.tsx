@@ -14,6 +14,7 @@ import { ChangesPage } from "./pages/Changes";
 import { HistoryPage } from "./pages/History";
 import { ConfigPage } from "./pages/Config";
 import { ChatPage } from "./pages/Chat";
+import { CurriculumPage } from "./pages/Curriculum";
 import { PublicationsPage } from "./pages/Publications";
 
 const queryClient = new QueryClient({
@@ -32,6 +33,7 @@ export default function App() {
             <Route element={<Layout />}>
               <Route index element={<DashboardPage />} />
               <Route path="levels" element={<LevelsPage />} />
+              <Route path="curriculum" element={<CurriculumPage />} />
               <Route path="teachers" element={<TeachersPage />} />
               <Route path="groups" element={<GroupsPage />} />
               <Route path="rooms" element={<RoomsPage />} />
