@@ -1,8 +1,9 @@
 from datetime import date, time
 from typing import Any
 
-from pydantic import BaseModel, EmailStr, Field, model_validator
+from pydantic import BaseModel, Field, model_validator
 
+from app.admin.email_field import DemoEmailStr
 from app.domain.models import PublicationStatus, ScheduleChangeStatus, ScheduleEntryStatus
 
 
@@ -21,7 +22,7 @@ class LevelOut(LevelIn):
 
 class TeacherIn(BaseModel):
     name: str
-    email: EmailStr
+    email: DemoEmailStr
     phone_whatsapp: str | None = None
     is_active: bool = True
 
