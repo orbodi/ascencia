@@ -33,45 +33,5 @@ services:
     # Image autonome : front buildé + migrate + seed au démarrage
     # Pas de bind-mount pour que /backoffice fonctionne dès le clone
 
-  # Front Vite (hot reload) — optionnel
-  # docker compose --profile dev up frontend
-  frontend:
-    image: node:22-alpine
-    container_name: geminia-frontend
-    working_dir: /fe
-    volumes:
-      - ./frontend:/fe
-    ports:
-      - "5173:5173"
-    environment:
-      VITE_DEMO_MODE: "true"
-      VITE_PROXY_TARGET: http://app:8000
-    command: sh -c "npm install && npm run dev -- --host 0.0.0.0 --port 5173"
-    depends_on:
-      - app
-    profiles:
-      - dev
-
-  # Tunnel HTTPS public (webhook Meta WhatsApp) — optionnel
-  # 1. NGROK_AUTHTOKEN dans .env (https://dashboard.ngrok.com/get-started/your-authtoken)
-  # 2. docker compose --profile tunnel up -d
-  # 3. URL publique : http://localhost:4040  ou  docker compose logs ngrok
-  # 4. Callback Meta : https://<sous-domaine>.ngrok-free.app/webhook/whatsapp
-  ngrok:
-    image: ngrok/ngrok:latest
-    container_name: geminia-ngrok
-    command:
-      - "http"
-      - "http://app:8000"
-      - "--log=stdout"
-    environment:
-      NGROK_AUTHTOKEN: ${NGROK_AUTHTOKEN:-}
-    ports:
-      - "4040:4040"
-    depends_on:
-      - app
-    profiles:
-      - tunnel
-
 volumes:
   geminia_pgdata:
