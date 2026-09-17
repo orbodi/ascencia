@@ -16,6 +16,7 @@ from app.domain.models import (
     StudentGroup,
 )
 from app.exporters import ExcelExporter, PdfExporter
+from app.services.display import strip_level_code
 from app.whatsapp.client import WhatsAppClient
 
 
@@ -91,7 +92,7 @@ class PublicationDistributionService:
                     pdf["path"],
                     caption=(
                         f"{settings.university_name} — emploi du temps "
-                        f"{group.name} — {publication.version_number}"
+                        f"{strip_level_code(group.name)} — {publication.version_number}"
                     ),
                     filename=pdf["filename"],
                 )

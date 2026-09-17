@@ -181,6 +181,7 @@ export function SchedulePage() {
   const [confirmDeleteSlot, setConfirmDeleteSlot] = useState<TimeSlot | null>(
     null
   );
+  const [presetsMessage, setPresetsMessage] = useState<string | null>(null);
 
   const weekParam = fmt(weekStart);
   const { data = [], isLoading, error, refetch } = useQuery({
@@ -296,12 +297,35 @@ export function SchedulePage() {
     },
   });
 
+  const applyPresets = useMutation({
+    mutationFn: () =>
+      api<TimeSlot[]>("/admin/timeslots/apply-standard-presets", {
+        method: "POST",
+        body: JSON.stringify({ days: [0, 1, 2, 3, 4] }),
+      }),
+    onSuccess: (rows) => {
+      setSlotError(null);
+      setPresetsMessage(
+        `${rows.length} créneau(x) disponible(s) sur Lundi-Vendredi ` +
+          `(matin 08h-12h commun, après-midi 13h-17h Bachelor 1-2, ` +
+          `soir 18h-22h Bachelor 3/Master 1-2). Les créneaux existants ` +
+          `n'ont pas été modifiés.`
+      );
+      void qc.invalidateQueries({ queryKey: ["timeslots"] });
+    },
+    onError: (err: unknown) => {
+      setPresetsMessage(null);
+      setSlotError(formatApiError(err));
+    },
+  });
+
   function closeSlotsModal() {
     setSlotsOpen(false);
     setEditingSlotId(null);
     setSlotForm(slotEmpty);
     setSlotError(null);
     setConfirmDeleteSlot(null);
+    setPresetsMessage(null);
     saveSlot.reset();
   }
 
@@ -747,6 +771,31 @@ export function SchedulePage() {
         titleId="timeslots-title"
         wide
       >
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-2 rounded-xl border border-line bg-mist/60 p-3">
+          <p className="text-sm text-ink-soft">
+            Plages standard de l'établissement : matin 08h-12h (commun),
+            après-midi 13h-17h (Bachelor 1-2), soir 18h-22h (Bachelor 3,
+            Master 1-2) — Lundi à Vendredi.
+          </p>
+          <Button
+            type="button"
+            variant="ghost"
+            disabled={applyPresets.isPending}
+            onClick={() => {
+              setSlotError(null);
+              applyPresets.mutate();
+            }}
+          >
+            {applyPresets.isPending
+              ? "Génération…"
+              : "Générer les plages standard"}
+          </Button>
+        </div>
+        {presetsMessage ? (
+          <p className="mb-4 rounded-lg bg-accent/10 p-2 text-sm text-accent">
+            {presetsMessage}
+          </p>
+        ) : null}
         <div className="grid gap-5 sm:grid-cols-[260px_1fr]">
           <form className="space-y-3" onSubmit={onSlotSubmit}>
             <h4 className="text-sm font-semibold">

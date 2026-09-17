@@ -2,6 +2,7 @@ from datetime import date, time, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -23,6 +24,7 @@ from app.domain.models import (
     TimeSlot,
 )
 from app.exporters import PdfExporter
+from app.services.display import strip_level_code
 from app.services.planning_service import PlanningService
 
 router = APIRouter(tags=["admin-schedule"])
@@ -33,6 +35,92 @@ def _parse_time(value: str) -> time:
     return time(int(parts[0]), int(parts[1]))
 
 
+def _serialize_timeslot(slot: TimeSlot) -> dict:
+    return {
+        "id": slot.id,
+        "day_of_week": slot.day_of_week,
+        "start_time": slot.start_time.strftime("%H:%M"),
+        "end_time": slot.end_time.strftime("%H:%M"),
+        "label": slot.label,
+    }
+
+
+_DAY_NAMES = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"]
+
+# Plages standard de l'établissement :
+# - 08h00-12h00 : cours du matin, commun à tous les niveaux.
+# - 13h00-17h00 : cours de l'après-midi, Bachelor 1 et 2.
+# - 18h00-22h00 : cours du soir, Bachelor 3, Master 1 et 2 (pas de cours
+#   l'après-midi pour ce groupe — programme en alternance).
+STANDARD_TIMESLOT_PRESET_BANDS: list[tuple[time, time, str]] = [
+    (time(8, 0), time(12, 0), ""),
+    (time(13, 0), time(17, 0), " (B1-B2)"),
+    (time(18, 0), time(22, 0), " (B3-M1-M2)"),
+]
+
+
+class TimeSlotPresetsIn(BaseModel):
+    days: list[int] = Field(min_length=1, description="0=lundi … 6=dimanche")
+
+    @field_validator("days")
+    @classmethod
+    def validate_days(cls, value: list[int]) -> list[int]:
+        for day in value:
+            if not 0 <= day <= 6:
+                raise ValueError("Jour invalide (0=lundi … 6=dimanche)")
+        return sorted(set(value))
+
+
+async def apply_standard_timeslot_presets_to_session(
+    session: AsyncSession, days: list[int]
+) -> list[TimeSlot]:
+    """Crée, de façon idempotente, les plages horaires standard pour les
+    jours donnés (créneaux déjà présents — même jour et mêmes horaires —
+    ignorés, donc rappelable sans créer de doublons)."""
+    existing = {
+        (s.day_of_week, s.start_time, s.end_time)
+        for s in (await session.execute(select(TimeSlot))).scalars().all()
+    }
+    for day in days:
+        for start, end, suffix in STANDARD_TIMESLOT_PRESET_BANDS:
+            key = (day, start, end)
+            if key in existing:
+                continue
+            session.add(
+                TimeSlot(
+                    day_of_week=day,
+                    start_time=start,
+                    end_time=end,
+                    label=(
+                        f"{_DAY_NAMES[day]} {start.strftime('%Hh%M')}-"
+                        f"{end.strftime('%Hh%M')}{suffix}"
+                    ),
+                )
+            )
+            existing.add(key)
+    await session.commit()
+    rows = (
+        await session.execute(
+            select(TimeSlot)
+            .where(TimeSlot.day_of_week.in_(days))
+            .order_by(TimeSlot.day_of_week, TimeSlot.start_time)
+        )
+    ).scalars().all()
+    return list(rows)
+
+
+@router.post(
+    "/admin/timeslots/apply-standard-presets", response_model=list[TimeSlotOut]
+)
+async def apply_standard_timeslot_presets(
+    body: TimeSlotPresetsIn,
+    _user: AdminUser = Depends(require_admin_write),
+    session: AsyncSession = Depends(get_db),
+) -> list[dict]:
+    rows = await apply_standard_timeslot_presets_to_session(session, body.days)
+    return [_serialize_timeslot(s) for s in rows]
+
+
 @router.get("/admin/timeslots", response_model=list[TimeSlotOut])
 async def list_timeslots(
     _user: AdminUser = Depends(require_admin_user),
@@ -41,16 +129,7 @@ async def list_timeslots(
     rows = (
         await session.execute(select(TimeSlot).order_by(TimeSlot.day_of_week, TimeSlot.start_time))
     ).scalars().all()
-    return [
-        {
-            "id": s.id,
-            "day_of_week": s.day_of_week,
-            "start_time": s.start_time.strftime("%H:%M"),
-            "end_time": s.end_time.strftime("%H:%M"),
-            "label": s.label,
-        }
-        for s in rows
-    ]
+    return [_serialize_timeslot(s) for s in rows]
 
 
 @router.post("/admin/timeslots", response_model=TimeSlotOut, status_code=201)
@@ -68,13 +147,7 @@ async def create_timeslot(
     session.add(slot)
     await session.commit()
     await session.refresh(slot)
-    return {
-        "id": slot.id,
-        "day_of_week": slot.day_of_week,
-        "start_time": slot.start_time.strftime("%H:%M"),
-        "end_time": slot.end_time.strftime("%H:%M"),
-        "label": slot.label,
-    }
+    return _serialize_timeslot(slot)
 
 
 @router.patch("/admin/timeslots/{timeslot_id}", response_model=TimeSlotOut)
@@ -93,13 +166,7 @@ async def update_timeslot(
     slot.label = body.label
     await session.commit()
     await session.refresh(slot)
-    return {
-        "id": slot.id,
-        "day_of_week": slot.day_of_week,
-        "start_time": slot.start_time.strftime("%H:%M"),
-        "end_time": slot.end_time.strftime("%H:%M"),
-        "label": slot.label,
-    }
+    return _serialize_timeslot(slot)
 
 
 @router.delete("/admin/timeslots/{timeslot_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -158,7 +225,11 @@ async def list_schedule(
             "status": e.status,
             "course_title": e.course.title if e.course else None,
             "teacher_name": e.course.teacher.name if e.course and e.course.teacher else None,
-            "group_name": e.course.group.name if e.course and e.course.group else None,
+            "group_name": (
+                strip_level_code(e.course.group.name)
+                if e.course and e.course.group
+                else None
+            ),
             "room_name": e.room.name if e.room else None,
             "timeslot_label": e.timeslot.label if e.timeslot else None,
         }

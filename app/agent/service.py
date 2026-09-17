@@ -22,6 +22,7 @@ from app.domain.models import (
     Teacher,
     TimeSlot,
 )
+from app.services.display import strip_level_code
 from app.services.system_config import get_gemini_model
 
 logger = logging.getLogger(__name__)
@@ -278,7 +279,7 @@ class AgentService:
                     f"- **{entry.entry_date.strftime('%d/%m')} "
                     f"({entry.timeslot.start_time.strftime('%H:%M')} - "
                     f"{entry.timeslot.end_time.strftime('%H:%M')})** : "
-                    f"{entry.course.title} · {entry.course.group.name} · "
+                    f"{entry.course.title} · {strip_level_code(entry.course.group.name)} · "
                     f"{entry.room.name} · {entry.course.teacher.name} "
                     f"(séance #{entry.id})"
                 )

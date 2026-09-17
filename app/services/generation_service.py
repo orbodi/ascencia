@@ -23,6 +23,7 @@ from app.domain.models import (
 )
 from app.config import settings
 from app.services.academic_calendar import academic_week_number
+from app.services.display import strip_level_code
 from app.services.curriculum_service import CurriculumService
 from app.services.planning_rules import (
     BlockingAvailability,
@@ -108,7 +109,7 @@ class ScheduleGenerationService:
                 "teacher_id": entry.course.teacher_id,
                 "teacher_name": entry.course.teacher.name,
                 "group_id": entry.course.group_id,
-                "group_name": entry.course.group.name,
+                "group_name": strip_level_code(entry.course.group.name),
                 "room_id": entry.room_id,
                 "room_name": entry.room.name,
                 "timeslot_id": entry.timeslot_id,
@@ -318,7 +319,7 @@ class ScheduleGenerationService:
                         "teacher_id": course.teacher_id,
                         "teacher_name": course.teacher.name,
                         "group_id": course.group_id,
-                        "group_name": course.group.name,
+                        "group_name": strip_level_code(course.group.name),
                         "room_id": room.id,
                         "room_name": room.name,
                         "timeslot_id": slot.id,

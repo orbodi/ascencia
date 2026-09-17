@@ -38,7 +38,7 @@ FORMAT_HINT = """
 Format d'affichage (UI back-office) :
 - Planning : une ligne par séance au format
   - **Mardi 04/08 (08:00 - 10:00)** : *Cours* (Groupe) avec Prof en salle X (Séance #ID)
-  Pas de tableau markdown ni HTML.
+  Pas de tableau markdown ni HTML. Groupe sans le code de parcours (pas de L1/L2/L3/M1/M2…).
 - Options de report : liste numérotée 1. 2. 3.
 - Heures restantes : « Titre : Xh restantes (Yh faites / Zh prévues) »
 """

@@ -21,6 +21,7 @@ from app.domain.models import (
     Teacher,
     TimeSlot,
 )
+from app.services.display import strip_level_code
 from app.services.planning_rules import (
     BlockingAvailability,
     CandidateCheck,
@@ -70,7 +71,7 @@ class PlanningService:
                 "teacher_id": c.teacher_id,
                 "teacher_name": c.teacher.name if c.teacher else None,
                 "group_id": c.group_id,
-                "group_name": c.group.name if c.group else None,
+                "group_name": strip_level_code(c.group.name) if c.group else None,
                 "duration_minutes": c.duration_minutes,
                 "duration_hours": self._format_hours(c.duration_minutes),
                 "planned_hours": self._format_hours(c.planned_minutes),
@@ -705,7 +706,9 @@ class PlanningService:
             ),
             "group_id": entry.course.group_id if entry.course else None,
             "group_name": (
-                entry.course.group.name if entry.course and entry.course.group else None
+                strip_level_code(entry.course.group.name)
+                if entry.course and entry.course.group
+                else None
             ),
             "room_id": entry.room_id,
             "room_name": entry.room.name if entry.room else None,

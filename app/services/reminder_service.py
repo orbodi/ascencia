@@ -11,6 +11,7 @@ from sqlalchemy.orm import selectinload
 
 from app.config import settings
 from app.domain.models import AuditLog, Course, ScheduleEntry, ScheduleEntryStatus
+from app.services.display import strip_level_code
 from app.services.system_config import get_agent_name
 from app.whatsapp import WhatsAppClient
 
@@ -56,7 +57,9 @@ class ReminderService:
                 f"Confirmation de présence demandée pour le cours "
                 f"« {entry.course.title} » le {entry.entry_date.isoformat()} "
                 f"({slot}, salle {entry.room.name if entry.room else '?'}, "
-                f"groupe {entry.course.group.name if entry.course.group else '?'}).\n\n"
+                f"groupe "
+                f"{strip_level_code(entry.course.group.name) if entry.course.group else '?'}"
+                f").\n\n"
                 f"Répondez à l'assistant {agent_name} :\n"
                 f"- « Je confirme la séance #{entry.id} »\n"
                 f"- ou « J'annule la séance #{entry.id} » pour proposer un report.\n"
